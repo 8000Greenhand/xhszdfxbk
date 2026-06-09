@@ -2,6 +2,7 @@ const state = {
   samples: [],
   products: [],
   voices: [],
+  analysisResults: {},
   typeMeta: {},
   productTags: {},
   taskTimer: null,
@@ -41,6 +42,7 @@ async function load() {
   state.samples = data.samples || [];
   state.products = data.products || [];
   state.voices = data.voices || [];
+  state.analysisResults = data.analysisResults || {};
   state.typeMeta = data.typeMeta || {};
   state.productTags = data.productTags || {};
   renderAll();
@@ -154,29 +156,36 @@ function resultSummary(result) {
   ].filter(Boolean);
 }
 
-function renderResults() {
-  const rows = state.samples.filter((item) => item.gpt?.result);
-  $("#resultList").innerHTML = rows.map((item) => {
-    const result = item.gpt.result;
-    const summary = resultSummary(result);
-    return `
-      <article class="result-card" id="result-${esc(result.id)}">
-        <div class="result-head">
-          <div>
-            <p class="eyebrow">${esc(item.sampleType)} · ${esc(item.contentForm || "")}</p>
-            <h3>${esc(item.title || item.url || item.id)}</h3>
-          </div>
-          ${badge(item.gpt.status || "已完成分析")}
+function resultCard(result, item = null) {
+  const summary = resultSummary(result);
+  return `
+    <article class="result-card" id="result-${esc(result.id)}">
+      <div class="result-head">
+        <div>
+          <p class="eyebrow">${esc(item?.sampleType || "GPT 分析结果")} · ${esc(item?.contentForm || "")}</p>
+          <h3>${esc(item?.title || item?.url || result.id)}</h3>
         </div>
-        ${summary.length ? `<div class="summary-grid">${summary.map((x) => `<div>${esc(x)}</div>`).join("")}</div>` : ""}
-        <details open>
-          <summary>查看 GPT 分析全文</summary>
-          <div class="markdown-box">${md(result.analysisText || "暂无分析正文。")}</div>
-        </details>
-        <p class="muted">结果路径：${esc(result.relativePath)}</p>
-      </article>
-    `;
-  }).join("") || `<div class="empty">还没有 GPT 分析结果。完整分析后，结果会出现在这里。</div>`;
+        ${badge(item?.gpt?.status || result.status?.status || "已完成分析")}
+      </div>
+      ${summary.length ? `<div class="summary-grid">${summary.map((x) => `<div>${esc(x)}</div>`).join("")}</div>` : ""}
+      <details open>
+        <summary>查看 GPT 分析全文</summary>
+        <div class="markdown-box">${md(result.analysisText || "暂无分析正文。")}</div>
+      </details>
+      <p class="muted">结果路径：${esc(result.relativePath)}</p>
+    </article>
+  `;
+}
+
+function renderResults() {
+  const linked = state.samples.filter((item) => item.gpt?.result);
+  const linkedIds = new Set(linked.map((item) => item.gpt.result.id));
+  const orphanResults = Object.values(state.analysisResults || {}).filter((result) => !linkedIds.has(result.id));
+  const html = [
+    ...linked.map((item) => resultCard(item.gpt.result, item)),
+    ...orphanResults.map((result) => resultCard(result, null)),
+  ].join("");
+  $("#resultList").innerHTML = html || `<div class="empty">还没有 GPT 分析结果。完整分析后，结果会出现在这里。</div>`;
 }
 
 function renderProducts() {
