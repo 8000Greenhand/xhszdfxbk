@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
   <body>
+    <datalist id="productOptions"></datalist>
     <aside class="sidebar">
       <div class="brand">
         <div class="mark">羊</div>
@@ -49,7 +50,7 @@
             <label class="field"><span>笔记链接</span><textarea id="urlInput" rows="3" placeholder="粘贴小红书笔记链接"></textarea></label>
             <div class="form-grid">
               <label class="field"><span>样本类型</span><select id="sampleType"><option>市场参考</option><option>达人合作</option><option>官号发布</option></select></label>
-              <label class="field"><span>内容形式</span><select id="contentForm"><option>自动识别</option><option>图文</option><option>视频</option><option>不确定</option></select></label>
+              <label class="field"><span>内容形式</span><select id="contentForm"><option>图文</option><option>视频</option></select></label>
               <label class="field"><span>处理方式</span><select id="processMode"><option>只登记</option><option>完整分析</option><option>等数据后分析</option></select></label>
               <label class="field"><span>标题（抓不到时手填）</span><input id="titleInput" placeholder="可选" /></label>
             </div>
@@ -58,7 +59,7 @@
               <div class="section-title">市场参考补充</div>
               <div class="form-grid">
                 <label class="field"><span>记录原因</span><select id="recordReason"><option value="">未选择</option><option>爆款</option><option>竞品</option><option>跨领域参考</option><option>封面好</option><option>标题好</option><option>结构好</option><option>评论好</option></select></label>
-                <label class="field"><span>相关产品</span><input id="marketProduct" placeholder="可能承接哪个产品，可选" /></label>
+                <label class="field"><span>相关产品</span><input id="marketProduct" list="productOptions" placeholder="可以选择产品卡，也可以手填" /></label>
               </div>
             </div>
 
@@ -66,7 +67,7 @@
               <div class="section-title">达人合作补充</div>
               <div class="form-grid">
                 <label class="field"><span>达人名称</span><input id="creatorInput" placeholder="达人/账号名" /></label>
-                <label class="field"><span>合作产品</span><input id="kolProduct" placeholder="四神饮 / 玉屏乌梅饮 / 其他" /></label>
+                <label class="field"><span>合作产品</span><input id="kolProduct" list="productOptions" placeholder="可以选择产品卡，也可以手填" /></label>
                 <label class="field"><span>合作花费</span><input id="costInput" placeholder="如 3000；不知道可空" /></label>
                 <label class="field"><span>合作形式</span><select id="collabType"><option value="">未选择</option><option>付费</option><option>置换</option><option>佣金</option><option>混合</option><option>不确定</option></select></label>
                 <label class="field"><span>数据追踪方式</span><select id="tracking"><option value="">未选择</option><option>小红星可追踪</option><option>平台可追踪</option><option>达人后台截图</option><option>仅公开数据</option><option>暂无数据</option></select></label>
@@ -77,7 +78,7 @@
             <div class="conditional hidden" data-for="官号发布">
               <div class="section-title">官号发布补充</div>
               <div class="form-grid">
-                <label class="field"><span>发布产品</span><input id="officialProduct" placeholder="对应产品" /></label>
+                <label class="field"><span>发布产品</span><input id="officialProduct" list="productOptions" placeholder="可以选择产品卡，也可以手填" /></label>
                 <label class="field"><span>是否挂车</span><select id="hasCart"><option value="">未选择</option><option>是</option><option>否</option></select></label>
                 <label class="field"><span>发布目的</span><select id="objective"><option value="">未选择</option><option>拉新</option><option>搜索承接</option><option>转化</option><option>节点</option><option>测试</option></select></label>
                 <label class="field"><span>发布时间</span><input id="publishDate" placeholder="如 2026-06-09，可选" /></label>
@@ -128,9 +129,9 @@
       <section class="view" id="view-voices">
         <div class="grid two">
           <section class="panel">
-            <div class="panel-head"><h2>添加用户原声</h2><span>评论、私信、客服、达人评论都可以。</span></div>
+            <div class="panel-head"><h2>添加用户原声</h2><span>评论、私信、客服、达人评论都可以。后续会自动沉淀分析中识别到的高价值评论。</span></div>
             <label class="field"><span>原声内容</span><textarea id="voiceText" rows="6" placeholder="例如：有没有链接？几岁能喝？怕太甜。"></textarea></label>
-            <div class="form-grid"><label class="field"><span>来源</span><input id="voiceSource" placeholder="笔记/客服/评论区" /></label><label class="field"><span>关联产品</span><input id="voiceProduct" placeholder="可选" /></label></div>
+            <div class="form-grid"><label class="field"><span>来源</span><input id="voiceSource" placeholder="笔记/客服/评论区" /></label><label class="field"><span>关联产品</span><input id="voiceProduct" list="productOptions" placeholder="可选" /></label></div>
             <button class="primary" id="addVoice"><i data-lucide="plus"></i><span>保存原声</span></button>
           </section>
           <section class="panel"><div class="panel-head"><h2>原声列表</h2><span id="voiceCount">0 条</span></div><div id="voiceList" class="stack"></div></section>
