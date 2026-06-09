@@ -1,9 +1,8 @@
-import csv
 import json
-import mimetypes
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -17,26 +16,48 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 OUTPUT_ROOT = ROOT / "outputs"
 DATA_ROOT = ROOT / "data"
-DB_PATH = DATA_ROOT / "workbench.json"
 TASK_ROOT = DATA_ROOT / "tasks"
+DB_PATH = DATA_ROOT / "workbench_v2.json"
 ANALYSIS_INBOX_ROOT = ROOT / "analysis_inbox"
 ANALYSIS_RESULTS_ROOT = ROOT / "analysis_results"
 
-
 DEFAULT_DB = {
-    "cases": [],
-    "insights": [],
+    "samples": [],
     "products": [],
-    "keywords": [],
-    "briefs": [],
-    "reviews": [],
+    "voices": [],
     "settings": {
-        "project": "小羊森林",
-        "scope": "母婴 / 儿童食养",
-        "risk_terms": ["积食", "消积食", "上火", "降火", "脾胃", "健脾", "调理", "改善便秘", "增强免疫力"],
-        "safe_terms": ["配料简单", "甜度适中", "口感温和", "日常加餐", "饭后小食", "出门方便", "妈妈选品参考"],
+        "name": "小红书内容样本与合作复盘工作台",
+        "sample_types": ["市场参考", "达人合作", "官号发布"],
+        "process_modes": ["只登记", "完整分析", "等数据后分析"],
     },
 }
+
+SAMPLE_TYPE_META = {
+    "市场参考": {
+        "table": "市场参考样本",
+        "goal": "学习外部爆款、竞品、跨领域内容，判断什么值得借鉴。",
+        "analysisFocus": ["点击吸引", "收藏理由", "评论需求", "结构借鉴", "产品承接", "风险边界", "转译方向"],
+    },
+    "达人合作": {
+        "table": "达人合作笔记",
+        "goal": "登记所有合作达人笔记，判断种草质量、合作价值和复投建议。",
+        "analysisFocus": ["人群匹配", "种草自然度", "评论需求", "数据追踪完整度", "花费性价比", "复投建议", "下次 brief"],
+    },
+    "官号发布": {
+        "table": "官号发布笔记",
+        "goal": "复盘官号图文/视频，判断封面标题、页内承接、商品点击和成交链路。",
+        "analysisFocus": ["封面标题", "第一页承接", "产品出现位置", "商品点击", "订单/GMV", "系列化价值", "下一篇改法"],
+    },
+}
+
+PRODUCT_TAGS = {
+    "forms": ["直饮", "膏方", "零食", "冲泡", "食材包", "饮品"],
+    "needs": ["脾胃", "积食后养护", "鼻敏", "清润", "上火", "日常加餐", "出门携带"],
+    "timing": ["日常", "饭后", "换季", "发作期辅助", "发作后养护", "关键几天"],
+    "content": ["搜索内容", "场景内容", "清单内容", "科普内容", "达人种草", "官号转化"],
+}
+
+COMMENT_KEYWORDS = ["链接", "怎么买", "哪里买", "哪家", "品牌", "牌子", "想买", "求", "价格", "几岁", "多大", "宝宝", "孩子", "适合", "配料", "甜", "糖", "安全", "添加", "健康", "怕", "有没有", "是什么"]
 
 
 def now_text():
@@ -49,36 +70,12 @@ def ensure_dirs():
     ANALYSIS_INBOX_ROOT.mkdir(exist_ok=True)
     ANALYSIS_RESULTS_ROOT.mkdir(exist_ok=True)
     if not DB_PATH.exists():
-        save_db(DEFAULT_DB)
-
-
-def load_db():
-    ensure_dirs()
-    try:
-        data = json.loads(DB_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        data = DEFAULT_DB.copy()
-    for key, value in DEFAULT_DB.items():
-        data.setdefault(key, value if not isinstance(value, list) else [])
-    return data
-
-
-def save_db(data):
-    DATA_ROOT.mkdir(exist_ok=True)
-    DB_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def note_id_from_url(url):
-    match = re.search(r"/(?:explore|discovery/item)/([0-9a-fA-F]+)", url or "")
-    if match:
-        return match.group(1)
-    match = re.search(r"([0-9a-fA-F]{20,})", url or "")
-    return match.group(1) if match else datetime.now().strftime("%Y%m%d-%H%M%S")
+        write_json(DB_PATH, DEFAULT_DB)
 
 
 def read_json(path, fallback=None):
     if fallback is None:
-        fallback = []
+        fallback = {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -86,22 +83,40 @@ def read_json(path, fallback=None):
 
 
 def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def read_text_file(path, fallback=""):
+def read_text(path, fallback=""):
     try:
         return path.read_text(encoding="utf-8")
     except Exception:
         return fallback
 
 
-def rows_to_dict(rows):
-    result = {}
-    for row in rows or []:
-        if isinstance(row, dict) and "field" in row:
-            result[str(row.get("field", ""))] = row.get("value", "")
-    return result
+def load_db():
+    ensure_dirs()
+    data = read_json(DB_PATH, {})
+    for key, value in DEFAULT_DB.items():
+        data.setdefault(key, [] if isinstance(value, list) else value)
+    return data
+
+
+def save_db(data):
+    write_json(DB_PATH, data)
+
+
+def note_id_from_url(url):
+    match = re.search(r"/(?:explore|discovery/item)/([0-9a-fA-F]+)", url or "")
+    if match:
+        return match.group(1)
+    match = re.search(r"([0-9a-fA-F]{20,})", url or "")
+    return match.group(1) if match else ""
+
+
+def safe_name(value):
+    text = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", str(value or "")).strip("_")
+    return text[:80] or datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
 def int_value(value):
@@ -110,29 +125,29 @@ def int_value(value):
     return int(match.group(0)) if match else 0
 
 
-def ratio(part, whole):
-    return round(part / whole, 2) if whole else 0
+def rows_to_dict(rows):
+    if isinstance(rows, dict):
+        return rows
+    result = {}
+    for row in rows or []:
+        if isinstance(row, dict) and "field" in row:
+            result[str(row.get("field", ""))] = row.get("value", "")
+    return result
 
 
-def safe_name(value):
-    text = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", str(value or "")).strip("_")
-    return text[:80] or datetime.now().strftime("%Y%m%d-%H%M%S")
-
-
-def output_raw_path(folder, name):
+def raw_path(folder, name):
     return folder / "raw" / name
 
 
 def find_output_folder(note_id):
     if not OUTPUT_ROOT.exists():
         return None
-    direct = OUTPUT_ROOT / str(note_id)
-    if direct.exists():
-        return direct
+    if note_id:
+        direct = OUTPUT_ROOT / str(note_id)
+        if direct.exists():
+            return direct
     folders = [p for p in OUTPUT_ROOT.iterdir() if p.is_dir()]
-    if not folders:
-        return None
-    return sorted(folders, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    return sorted(folders, key=lambda p: p.stat().st_mtime, reverse=True)[0] if folders else None
 
 
 def find_first_file(folder, patterns):
@@ -143,27 +158,26 @@ def find_first_file(folder, patterns):
     return None
 
 
-def compact_transcript(folder):
-    rows = read_json(output_raw_path(folder, "transcript.json"), [])
-    if isinstance(rows, list) and rows:
-        lines = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            text = str(row.get("text", "")).strip()
-            if text:
-                start = row.get("start", "")
-                lines.append(f"- {start}s {text}" if start != "" else f"- {text}")
-        return "\n".join(lines) if lines else "暂无口播转写。"
-    text_path = output_raw_path(folder, "口播转写.txt")
-    text = read_text_file(text_path).strip()
-    return text or "暂无口播转写。"
+def digest_comments(comments, limit=50):
+    rows = []
+    for row in comments if isinstance(comments, list) else []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text", "")).strip()
+        if not text:
+            continue
+        author = row.get("author") or row.get("nickname") or "未知"
+        rows.append({"author": author, "text": text, "likes": row.get("likes", 0)})
+    if not rows:
+        return "未提取到。"
+    priority = [r for r in rows if any(k in r["text"] for k in COMMENT_KEYWORDS)]
+    final = (priority + [r for r in rows if r not in priority])[:limit]
+    return "\n".join([f"{idx+1}. {r['author']}：{r['text']}" for idx, r in enumerate(final)])
 
 
 def compact_ocr(folder):
-    rows = read_json(output_raw_path(folder, "ocr.json"), [])
-    seen = set()
-    lines = []
+    rows = read_json(raw_path(folder, "ocr.json"), [])
+    lines, seen = [], set()
     for row in rows if isinstance(rows, list) else []:
         frame = row.get("frame", "") if isinstance(row, dict) else ""
         for item in row.get("texts", []) if isinstance(row, dict) else []:
@@ -174,1168 +188,469 @@ def compact_ocr(folder):
             if key in seen:
                 continue
             seen.add(key)
-            lines.append(f"- {frame}: {text}" if frame else f"- {text}")
+            lines.append(f"- {frame}：{text}" if frame else f"- {text}")
             if len(lines) >= 120:
                 break
         if len(lines) >= 120:
             break
-    return "\n".join(lines) if lines else "暂无 OCR 文字。"
+    return "\n".join(lines) if lines else "未提取到。"
 
 
-COMMENT_KEYWORDS = [
-    "链接", "怎么买", "哪里买", "哪家", "品牌", "牌子", "想买", "求", "价格",
-    "几岁", "多大", "宝宝", "孩子", "适合", "配料", "甜", "糖", "安全", "添加",
-    "健康", "焦虑", "怕", "不敢", "有没有", "是什么",
-]
+def compact_transcript(folder):
+    rows = read_json(raw_path(folder, "transcript.json"), [])
+    if isinstance(rows, list) and rows:
+        lines = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text", "")).strip()
+            if not text:
+                continue
+            start = row.get("start", "")
+            end = row.get("end", "")
+            prefix = f"{start}-{end}" if start != "" and end != "" else str(start)
+            lines.append(f"{prefix} {text}" if prefix else text)
+        if lines:
+            return "\n".join(lines)
+    return read_text(raw_path(folder, "口播转写.txt"), "").strip() or "未提取到。"
 
 
-def digest_comments(comments, limit=30):
-    selected = []
-    fallback = []
-    for row in comments if isinstance(comments, list) else []:
-        if not isinstance(row, dict):
-            continue
-        text = str(row.get("text", "")).strip()
-        if not text:
-            continue
-        item = {
-            "rank": row.get("rank", ""),
-            "author": row.get("author", ""),
-            "likes": row.get("likes", 0),
-            "text": text,
-        }
-        fallback.append(item)
-        if any(word in text for word in COMMENT_KEYWORDS):
-            selected.append(item)
-        if len(selected) >= limit:
+def list_local_files(folder):
+    rows = []
+    for path in folder.rglob("*"):
+        if path.is_file():
+            rows.append("- " + str(path.relative_to(folder)).replace("\\", "/"))
+        if len(rows) >= 220:
+            rows.append("- ……")
             break
-    rows = selected or fallback[:limit]
-    if not rows:
-        return "暂无高价值评论。"
-    return "\n".join(
-        f"- #{row.get('rank') or '-'} {row.get('author') or '未知'}：{row.get('text')}"
-        for row in rows[:limit]
-    )
+    return "\n".join(rows) if rows else "未提取到。"
 
 
-def markdown_list(title, rows):
-    value = str(rows or "").strip()
-    return f"## {title}\n\n{value if value else '暂无'}\n"
+def infer_content_form(folder):
+    if list((folder / "assets").glob("*.mp4")):
+        return "视频"
+    if list((folder / "assets").glob("*.jpg")) or list((folder / "assets").glob("*.png")):
+        return "图文"
+    return "不确定"
 
 
-def get_inbox_items():
-    items = {}
-    if not ANALYSIS_INBOX_ROOT.exists():
-        return items
-    for folder in ANALYSIS_INBOX_ROOT.iterdir():
-        if not folder.is_dir():
-            continue
-        manifest = read_json(folder / "manifest.json", {})
-        status = read_json(folder / "status.json", {})
-        inbox_id = manifest.get("id") or folder.name
-        note_id = manifest.get("note_id") or ""
-        item = {
-            "id": inbox_id,
-            "noteId": note_id,
-            "folder": folder.name,
-            "relativePath": f"analysis_inbox/{folder.name}",
-            "createdAt": manifest.get("created_at") or status.get("created_at") or "",
-            "status": status.get("status") or manifest.get("status") or "pending_gpt_analysis",
-            "resultFolder": status.get("result_folder", ""),
-            "manifest": manifest,
-        }
-        items[inbox_id] = item
-        if note_id:
-            items[note_id] = item
-    return items
-
-
-def get_result_items():
-    items = {}
-    if not ANALYSIS_RESULTS_ROOT.exists():
-        return items
-    for folder in ANALYSIS_RESULTS_ROOT.iterdir():
-        if not folder.is_dir():
-            continue
-        result = {
-            "folder": folder.name,
-            "relativePath": f"analysis_results/{folder.name}",
-            "gptAnalysis": read_text_file(folder / "gpt_analysis.md"),
-            "taskBrief": read_text_file(folder / "task_brief.md"),
-            "json": read_json(folder / "gpt_analysis.json", None),
-        }
-        items[folder.name] = result
-    return items
-
-
-def attach_gpt_state(case):
-    inbox_items = get_inbox_items()
-    result_items = get_result_items()
-    inbox = inbox_items.get(case.get("id", ""))
-    result = None
-    if inbox:
-        result = result_items.get(inbox.get("id")) or result_items.get(inbox.get("folder"))
-    result = result or result_items.get(case.get("id", ""))
-    if inbox and result:
-        inbox["status"] = "gpt_result_ready"
-    case["gpt"] = {
-        "status": "gpt_result_ready" if result else (inbox.get("status") if inbox else "not_uploaded"),
-        "inbox": inbox,
-        "result": result,
-    }
-    return case
-
-
-def create_analysis_package(note_id, url):
+def build_analysis_input(package_id, note_id, url, sample_meta=None):
     folder = find_output_folder(note_id)
     if not folder:
-        raise RuntimeError("未找到本地抓取输出文件夹，无法生成 GPT 分析包。")
-    note = rows_to_dict(read_json(output_raw_path(folder, "note.json"), []))
-    comments = read_json(output_raw_path(folder, "comments.json"), [])
-    created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    package_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{safe_name(note_id or folder.name)}"
-    package_dir = ANALYSIS_INBOX_ROOT / package_id
-    package_dir.mkdir(parents=True, exist_ok=False)
-
+        raise RuntimeError("未找到本地 outputs 输出文件夹。")
+    note = rows_to_dict(read_json(raw_path(folder, "note.json"), []))
+    comments = read_json(raw_path(folder, "comments.json"), [])
+    sample_meta = sample_meta or {}
     metrics = {
         "likes": int_value(note.get("likes")),
         "collects": int_value(note.get("collects")),
         "comments": int_value(note.get("comments")) or len(comments if isinstance(comments, list) else []),
     }
+    tags = note.get("tags", "") or note.get("topics", "") or "未提取到。"
+    content = note.get("content", "") or note.get("desc", "") or read_text(raw_path(folder, "note.stdout.txt"), "").strip() or "未提取到。"
+    contact_sheet = find_first_file(folder, ["*关键帧总览*.jpg", "*总览*.jpg", "*.jpg"])
+    local_files = list_local_files(folder)
+    return f"""# GPT 分析输入包
+
+## 1. 基础信息
+
+- 分析包 ID：{package_id}
+- 小红书笔记 ID：{note_id or folder.name}
+- 原始链接：{url}
+- 标题：{note.get('title', '') or sample_meta.get('title', '') or '未提取到'}
+- 作者：{note.get('author', '') or sample_meta.get('creator', '') or '未提取到'}
+- 内容形式：{sample_meta.get('contentForm') or infer_content_form(folder)}
+- 样本类型：{sample_meta.get('sampleType', '未标注')}
+- 处理方式：{sample_meta.get('processMode', '未标注')}
+- 点赞：{metrics['likes']}
+- 收藏：{metrics['collects']}
+- 评论：{metrics['comments']}
+- 创建时间：{now_text()}
+
+## 2. 用户备注 / 分析背景
+
+{sample_meta.get('note', '').strip() or '未填写。'}
+
+## 3. 合作 / 发布补充信息
+
+- 达人名称：{sample_meta.get('creator', '') or '未填写'}
+- 合作产品 / 发布产品：{sample_meta.get('product', '') or '未填写'}
+- 合作花费：{sample_meta.get('cost', '') or '未填写'}
+- 合作形式：{sample_meta.get('collabType', '') or '未填写'}
+- 数据追踪方式：{sample_meta.get('tracking', '') or '未填写'}
+- 初步判断：{sample_meta.get('initialJudgement', '') or '未填写'}
+- 是否挂车：{sample_meta.get('hasCart', '') or '未填写'}
+- 选题/合作目的：{sample_meta.get('objective', '') or '未填写'}
+
+## 4. 笔记正文
+
+{content}
+
+## 5. 标签 / 话题
+
+{tags}
+
+## 6. 评论区原话
+
+{digest_comments(comments, 50)}
+
+## 7. 画面 OCR 文字
+
+{compact_ocr(folder)}
+
+## 8. 口播转写
+
+{compact_transcript(folder)}
+
+## 9. 关键帧 / 画面摘要
+
+关键帧总览图本地路径：
+
+{str(contact_sheet) if contact_sheet else '未提取到。'}
+
+## 10. 本地素材文件说明
+
+outputs/{folder.name}/ 下存在以下关键文件：
+
+{local_files}
+
+说明：视频、图片、frames、outputs 原始素材只保存在本机，不上传 GitHub。GPT 请只读取 analysis_inbox 中的文字材料。
+
+## 11. 给 GPT 的分析任务
+
+请根据样本类型输出有业务价值的分析：
+
+- 市场参考：判断为什么值得记录、点击钩子、用户需求、评论信号、可借鉴结构、适合小羊森林哪个产品、能否转成官号内容、不能照抄什么、给出一版可执行转译方向。
+- 达人合作：判断种草是否有效、人群是否匹配、内容是否讲清产品、评论区需求、数据追踪完整度、花费与性价比、是否值得复投、下次 brief 怎么改、哪些结构可复用到官号。
+- 官号发布：判断封面标题、第一页承接、页内结构、产品出现位置、商品点击/成交链路、是否值得系列化、下一篇怎么改。
+
+如果资料不足，请明确列出需要用户补充的字段，不要硬猜。
+"""
+
+
+def create_analysis_package(note_id, url, sample_meta=None):
+    created = now_text()
+    package_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{safe_name(note_id or uuid.uuid4().hex[:8])}"
+    package_dir = ANALYSIS_INBOX_ROOT / package_id
+    package_dir.mkdir(parents=True, exist_ok=False)
+    analysis_input = build_analysis_input(package_id, note_id, url, sample_meta)
     manifest = {
         "id": package_id,
-        "note_id": str(note_id or folder.name),
+        "note_id": note_id,
         "url": url,
         "created_at": created,
-        "title": note.get("title", ""),
-        "author": note.get("author", ""),
-        "metrics": metrics,
+        "sample_type": (sample_meta or {}).get("sampleType", ""),
+        "process_mode": (sample_meta or {}).get("processMode", ""),
         "status": "pending_gpt_analysis",
     }
-    source = "\n".join([
-        "# GPT 待分析素材",
-        "",
-        f"- 链接：{url}",
-        f"- 标题：{note.get('title', '') or '未获取'}",
-        f"- 作者：{note.get('author', '') or '未获取'}",
-        f"- 发布时间：{note.get('publish_time', '') or note.get('time', '') or '未获取'}",
-        f"- 点赞：{metrics['likes']}",
-        f"- 收藏：{metrics['collects']}",
-        f"- 评论：{metrics['comments']}",
-        f"- 话题标签：{note.get('tags', '') or '未获取'}",
-        "",
-        "## 正文",
-        "",
-        note.get("content", "") or "未获取正文。",
-        "",
-        "## 初步可见信息",
-        "",
-        "本文件由本地工作台自动生成，只包含文字摘要，不包含视频、原图和下载缓存。",
-    ])
-    local_files = {
-        "output_folder": str(folder),
-        "contact_sheet": str(find_first_file(folder, ["*关键帧总览*.jpg", "*总览*.jpg", "*.jpg"]) or ""),
-        "raw_note_json": str(output_raw_path(folder, "note.json")),
-        "raw_comments_json": str(output_raw_path(folder, "comments.json")),
-    }
-    status = {
-        "status": "pending_gpt_analysis",
-        "created_at": created,
-        "updated_at": created,
-        "result_folder": "",
-    }
-
+    status = {"status": "已上传 GitHub，等待 GPT 分析", "created_at": created, "updated_at": created, "result_folder": ""}
     write_json(package_dir / "manifest.json", manifest)
-    (package_dir / "source.md").write_text(source, encoding="utf-8")
-    (package_dir / "transcript.md").write_text(markdown_list("口播转写", compact_transcript(folder)), encoding="utf-8")
-    (package_dir / "ocr.md").write_text(markdown_list("关键帧 OCR", compact_ocr(folder)), encoding="utf-8")
-    (package_dir / "comments_digest.md").write_text(markdown_list("高价值评论摘要", digest_comments(comments)), encoding="utf-8")
-    write_json(package_dir / "local_files.json", local_files)
     write_json(package_dir / "status.json", status)
-    return {
-        "id": package_id,
-        "folder": str(package_dir),
-        "relativePath": f"analysis_inbox/{package_id}",
-        "createdAt": created,
-    }
+    (package_dir / "analysis_input.md").write_text(analysis_input, encoding="utf-8")
+    (package_dir / "source.md").write_text(analysis_input[:12000], encoding="utf-8")
+    return package_id
 
 
-def git_status_porcelain():
-    proc = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout = proc.stdout.decode("utf-8", errors="replace")
-    stderr = proc.stderr.decode("utf-8", errors="replace")
-    if proc.returncode != 0:
-        raise RuntimeError(stderr or stdout or "git status failed")
-    return stdout.splitlines()
+def git_upload(path):
+    rel = str(path.relative_to(ROOT)).replace("\\", "/")
+    try:
+        subprocess.run(["git", "add", rel], cwd=ROOT, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", f"Add GPT analysis package {path.name}"], cwd=ROOT, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True, capture_output=True, text=True)
+        return True, "已上传 GitHub"
+    except subprocess.CalledProcessError as exc:
+        return False, (exc.stderr or exc.stdout or str(exc)).strip()
 
 
-def status_path(line):
-    path = line[3:] if len(line) > 3 else ""
-    if " -> " in path:
-        path = path.split(" -> ", 1)[1]
-    return path.replace("\\", "/").strip().strip('"')
-
-
-def ensure_only_analysis_dirty():
-    blocked = []
-    for line in git_status_porcelain():
-        path = status_path(line)
-        if path and not (path.startswith("analysis_inbox/") or path.startswith("analysis_results/")):
-            blocked.append(line)
-    if blocked:
-        raise RuntimeError("存在非分析目录的本地改动，已停止自动上传：" + "；".join(blocked[:8]))
-
-
-def sync_analysis_package(package_id):
-    ensure_only_analysis_dirty()
-    rel = f"analysis_inbox/{package_id}"
-    status_path = ANALYSIS_INBOX_ROOT / package_id / "status.json"
-    status = read_json(status_path, {})
-    status["status"] = "已上传 GitHub，等待 GPT 分析"
-    status["updated_at"] = now_text()
-    write_json(status_path, status)
-    subprocess.run(["git", "add", rel], cwd=str(ROOT), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", rel], cwd=str(ROOT))
-    if staged.returncode == 0:
-        return {"ok": True, "uploaded": False, "message": "没有新文件需要上传。"}
-    commit = subprocess.run(
-        ["git", "commit", "-m", f"Add analysis inbox {package_id}"],
-        cwd=str(ROOT),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    if commit.returncode != 0:
-        raise RuntimeError((commit.stderr or commit.stdout).decode("utf-8", errors="replace"))
-    push = subprocess.run(["git", "push", "origin", "main"], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if push.returncode != 0:
-        raise RuntimeError((push.stderr or push.stdout).decode("utf-8", errors="replace"))
-    return {"ok": True, "uploaded": True, "message": "已上传到 GitHub，回到 GPT 说：分析最新一条。"}
-
-
-def list_output_cases():
-    cases = []
-    if not OUTPUT_ROOT.exists():
-        return cases
-    for folder in sorted(OUTPUT_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+def get_results():
+    results = {}
+    if not ANALYSIS_RESULTS_ROOT.exists():
+        return results
+    for folder in ANALYSIS_RESULTS_ROOT.iterdir():
         if not folder.is_dir():
             continue
-        note = rows_to_dict(read_json(folder / "raw" / "note.json", []))
-        comments = read_json(folder / "raw" / "comments.json", [])
-        case = build_case_from_output(folder.name, folder, note, comments)
-        cases.append(attach_gpt_state(case))
-    return cases
-
-
-def build_case_from_output(case_id, folder, note, comments):
-    likes = int_value(note.get("likes"))
-    collects = int_value(note.get("collects"))
-    comment_count = int_value(note.get("comments")) or len(comments or [])
-    save_ratio = ratio(collects, likes)
-    comment_ratio = ratio(comment_count, likes)
-    title = note.get("title") or case_id
-    content = note.get("content") or ""
-    tags = note.get("tags") or ""
-    output_files = {
-        "folder": str(folder),
-        "contactSheet": str(folder / "关键帧总览.jpg") if (folder / "关键帧总览.jpg").exists() else "",
-        "materialReport": str(folder / "拆解素材包.md") if (folder / "拆解素材包.md").exists() else "",
-        "finalReport": str(folder / "爆款拆解报告.md") if (folder / "爆款拆解报告.md").exists() else "",
-    }
-    analysis = analyze_case(title, content, tags, likes, collects, comment_count, comments)
-    return {
-        "id": case_id,
-        "url": "",
-        "source": "市场样本",
-        "project": "小羊森林",
-        "title": title,
-        "author": note.get("author", ""),
-        "type": "视频" if list((folder / "assets").glob("*.mp4")) else "图文/未知",
-        "status": "已完成",
-        "createdAt": datetime.fromtimestamp(folder.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-        "metrics": {
-            "likes": likes,
-            "collects": collects,
-            "comments": comment_count,
-            "saveRatio": save_ratio,
-            "commentRatio": comment_ratio,
-        },
-        "raw": {
-            "content": content,
-            "tags": tags,
-            "comments": comments[:30],
-        },
-        "analysis": analysis,
-        "files": output_files,
-    }
-
-
-def analyze_case(title, content, tags, likes, collects, comments_count, comments):
-    save_ratio = ratio(collects, likes)
-    comment_ratio = ratio(comments_count, likes)
-    joined_comments = "\n".join(str(c.get("text", "")) for c in comments or [] if isinstance(c, dict))
-    all_text = "\n".join([title or "", content or "", tags or "", joined_comments])
-
-    demand_hits = keyword_hits(all_text, ["链接", "品牌", "牌子", "哪家", "怎么买", "想买", "求", "价格", "几岁", "多大"])
-    safety_hits = keyword_hits(all_text, ["无添加", "低糖", "配料", "健康", "宝宝", "孩子", "零食", "加餐"])
-    risk_hits = keyword_hits(all_text, DEFAULT_DB["settings"]["risk_terms"])
-
-    if save_ratio >= 0.45 or demand_hits >= 4:
-        grade = "A 完整拆解"
-    elif save_ratio >= 0.25 or comment_ratio >= 0.08:
-        grade = "B 轻量拆解"
-    elif likes > 0:
-        grade = "C 记录观察"
-    else:
-        grade = "D 暂不建议"
-
-    if any(word in all_text for word in ["清单", "推荐", "分享", "合集"]) or content.count("#") >= 5:
-        viral_type = "清单型 / 选品型"
-    elif any(word in all_text for word in ["测评", "试吃", "横评"]):
-        viral_type = "测评型"
-    elif any(word in all_text for word in ["避坑", "别买", "踩雷"]):
-        viral_type = "避坑型"
-    else:
-        viral_type = "种草型 / 经验分享型"
-
-    if save_ratio >= 0.4:
-        value_type = "收藏型 / 购买决策型"
-    elif comment_ratio >= 0.1:
-        value_type = "讨论型 / 问询型"
-    else:
-        value_type = "普通种草型"
-
-    fit = "高" if safety_hits >= 4 and grade.startswith(("A", "B")) else "中" if safety_hits >= 2 else "低"
-    risk = "高" if risk_hits >= 2 else "中" if risk_hits == 1 else "低"
-    strategy = account_strategy(all_text)
-    reproducibility = reproducibility_score(save_ratio, comment_ratio, demand_hits, safety_hits, risk_hits, all_text)
-    evidence = evidence_score(all_text, comments or [])
-    production = production_difficulty(all_text)
-    priority = replicate_priority(grade, fit, risk, reproducibility, evidence, production)
-    replicate = priority["decision"]
-
-    user_questions = extract_user_questions(joined_comments)
-    return {
-        "grade": grade,
-        "viralType": viral_type,
-        "valueType": value_type,
-        "accountStrategy": strategy,
-        "reproducibilityScore": reproducibility,
-        "evidenceScore": evidence,
-        "productionDifficulty": production,
-        "priorityScore": priority["score"],
-        "priorityLevel": priority["level"],
-        "targetUser": "关注宝宝零食、儿童食养和日常加餐选择的妈妈",
-        "surfaceNeed": "想快速知道哪些儿童零食/食养产品值得看、怎么买、适合什么场景",
-        "deepAnxiety": "怕配料复杂、怕太甜、怕不适合年龄、怕买错后孩子不接受",
-        "hookTitle": title or "标题信息不足",
-        "hookCover": "需要结合封面图判断；优先看是否出现产品清单、配料表、孩子试吃或强人群词",
-        "hookFirstSeconds": "需要结合视频关键帧判断；优先看前 3 秒是否直接给人群、标准或结果",
-        "trustMechanism": pick_trust_mechanism(all_text),
-        "saveReason": "清单密度高、可回头对照购买，且评论区有品牌/链接/年龄等决策问题",
-        "commentReason": "用户想追问品牌、链接、适用年龄、甜度、配料和购买方式",
-        "conversionSignal": "高" if demand_hits >= 4 else "中" if demand_hits >= 2 else "低",
-        "xiaoyangFit": fit,
-        "riskLevel": risk,
-        "replicateDecision": replicate,
-        "replicableParts": ["选题角度", "清单结构", "配料表证据", "评论区承接"],
-        "notToCopy": ["夸大功效", "逐字照抄原文", "没有证据的健康承诺", "只堆产品名"],
-        "copyRisk": copy_risk(all_text, risk_hits),
-        "negativeSignals": negative_signals(all_text, save_ratio, comment_ratio, comments or []),
-        "productDirection": infer_product_direction(all_text),
-        "userQuestions": user_questions,
-        "evidenceNeeded": ["产品包装", "配料表", "适用年龄说明", "真实试吃反馈", "日常场景画面"],
-        "safeExpression": ["配料简单", "甜度适中", "口感温和", "日常加餐", "出门携带方便"],
-        "riskWarnings": build_risk_warnings(risk_hits),
-        "replicatePlan": replicate_plan(strategy, viral_type, all_text),
-        "nextAction": next_action(grade, fit, risk),
-    }
-
-
-def keyword_hits(text, words):
-    return sum(text.count(word) for word in words)
-
-
-def pick_trust_mechanism(text):
-    parts = []
-    if "配料" in text or "无添加" in text:
-        parts.append("配料表证据")
-    if "宝宝" in text or "孩子" in text:
-        parts.append("真实妈妈/孩子使用场景")
-    if any(word in text for word in ["链接", "品牌", "牌子", "哪家"]):
-        parts.append("评论区购买问询")
-    return " / ".join(parts) if parts else "人设信任 + 经验分享"
-
-
-def account_strategy(text):
-    if any(word in text for word in ["清单", "合集", "推荐", "分享"]) or text.count("#") >= 5:
-        return {
-            "type": "清单型妈妈选品账号",
-            "why": "用多款产品和筛选标准降低妈妈决策成本，天然适合收藏和评论追问。",
-            "bestFor": "小羊森林可以借这个打法做产品矩阵、场景清单和配料表选品标准。",
+        text = read_text(folder / "analysis_result.md") or read_text(folder / "gpt_analysis.md") or read_text(folder / "task_brief.md")
+        status = read_json(folder / "result_status.json", {}) or read_json(folder / "gpt_analysis.json", {})
+        results[folder.name] = {
+            "id": folder.name,
+            "relativePath": f"analysis_results/{folder.name}",
+            "analysisText": text,
+            "status": status,
         }
-    if any(word in text for word in ["避坑", "别买", "踩雷"]):
-        return {
-            "type": "避坑型妈妈账号",
-            "why": "通过风险提醒获得信任，但对品牌自有账号更容易显得攻击性强。",
-            "bestFor": "适合改成温和选品标准，不建议直接做强避坑口吻。",
-        }
-    if any(word in text for word in ["测评", "试吃", "横评"]):
-        return {
-            "type": "测评型妈妈账号",
-            "why": "靠对比和真实体验建立信任，适合沉淀长期栏目。",
-            "bestFor": "小羊森林可以做产品证据和试吃反馈，但要避免假客观测评。",
-        }
-    return {
-        "type": "经验种草型妈妈账号",
-        "why": "靠真实经验和生活场景带来信任，爆发力取决于人设可信度。",
-        "bestFor": "适合作为品牌日常内容，但需要补足证据画面降低广告感。",
-    }
+    return results
 
 
-def reproducibility_score(save_ratio, comment_ratio, demand_hits, safety_hits, risk_hits, text):
-    score = 45
-    score += min(20, int(save_ratio * 25))
-    score += min(15, int(comment_ratio * 80))
-    score += min(15, demand_hits * 2)
-    score += min(10, safety_hits)
-    if any(word in text for word in ["配料", "无添加", "低糖", "怎么选"]):
-        score += 8
-    if any(word in text for word in ["孩子出镜", "女儿", "儿子", "宝宝试吃"]):
-        score -= 5
-    score -= min(18, risk_hits * 7)
-    return max(0, min(100, score))
-
-
-def evidence_score(text, comments):
-    score = 30
-    evidence_words = ["配料", "包装", "试吃", "清单", "链接", "品牌", "牌子", "年龄", "几岁", "口感"]
-    for word in evidence_words:
-        if word in text:
-            score += 6
-    if len(comments) >= 8:
-        score += 8
-    if any(str(c.get("text", "")).find("链接") >= 0 for c in comments if isinstance(c, dict)):
-        score += 10
-    return max(0, min(100, score))
-
-
-def production_difficulty(text):
-    hard_signals = ["孩子出镜", "宝宝试吃", "户外", "探店", "大量产品", "测评"]
-    count = sum(1 for word in hard_signals if word in text)
-    if count >= 3:
-        return "高"
-    if count >= 1 or text.count("#") >= 8:
-        return "中"
-    return "低"
-
-
-def replicate_priority(grade, fit, risk, reproducibility, evidence, production):
-    score = 0
-    score += 30 if grade.startswith("A") else 22 if grade.startswith("B") else 10 if grade.startswith("C") else 0
-    score += {"高": 25, "中": 15, "低": 4}.get(fit, 0)
-    score += int(reproducibility * 0.22)
-    score += int(evidence * 0.16)
-    score -= {"高": 18, "中": 8, "低": 0}.get(risk, 0)
-    score -= {"高": 10, "中": 4, "低": 0}.get(production, 0)
-    score = max(0, min(100, score))
-    if score >= 78:
-        level = "S 立即进入创作"
-        decision = "立刻复刻"
-    elif score >= 62:
-        level = "A 补证据后复刻"
-        decision = "先补资料"
-    elif score >= 42:
-        level = "B 只学习结构"
-        decision = "只学习"
-    else:
-        level = "C 只记录"
-        decision = "只记录"
-    return {"score": score, "level": level, "decision": decision}
-
-
-def copy_risk(text, risk_hits):
-    risks = []
-    if risk_hits:
-        risks.append("出现食养高风险词，不能按原话对外写功效。")
-    if any(word in text for word in ["链接", "品牌", "牌子"]):
-        risks.append("评论区有购买问询，复刻时需要提前准备产品信息和客服承接。")
-    if not any(word in text for word in ["配料", "无添加", "低糖", "怎么选"]):
-        risks.append("证据标准不够明显，直接复刻容易变成普通广告。")
-    if not risks:
-        risks.append("主要风险是不要照抄原文和镜头顺序，要复刻结构与证据逻辑。")
-    return risks
-
-
-def negative_signals(text, save_ratio, comment_ratio, comments):
-    signals = []
-    if save_ratio < 0.2:
-        signals.append("收藏比偏低，说明内容可能没有形成清单或决策价值。")
-    if comment_ratio < 0.04:
-        signals.append("评论比偏低，说明用户没有明显追问或互动动机。")
-    if any(word in text for word in ["太贵", "骗人", "广告", "智商税"]):
-        signals.append("评论或正文出现质疑信号，需要避免广告感。")
-    if len(comments) < 5:
-        signals.append("评论样本较少，用户需求判断可信度有限。")
-    return signals or ["暂未看到明显反面信号，但仍需结合更多同类案例验证。"]
-
-
-def replicate_plan(strategy, viral_type, text):
-    if "清单" in viral_type or "选品" in viral_type:
-        return [
-            "先确定一个妈妈问题：怕太甜、怕配料复杂、出门加餐、饭后小食等。",
-            "用 3 到 5 个产品做清单，不追求多，追求每个都有证据。",
-            "每个产品固定拍 4 个镜头：包装、配料表、口感/质地、真实场景。",
-            "结尾不要强卖，评论区承接年龄、甜度、配料和购买方式。",
-        ]
-    if "测评" in viral_type:
-        return [
-            "先声明筛选标准，不做空泛好吃不好吃。",
-            "每个产品用同一套维度比较：配料、甜度、口感、场景、孩子接受度。",
-            "避免伪客观，品牌自有内容要用真实记录口吻。",
-        ]
-    return [
-        "保留妈妈真实经验口吻，但必须补足配料表和场景证据。",
-        "把卖点改成选品标准，不直接夸产品。",
-        "评论区准备安全表达版回复。"
-    ]
-
-
-def infer_product_direction(text):
-    mapping = [
-        ("奶酪", "奶酪/乳制零食"),
-        ("苹果", "果干/水果零食"),
-        ("山楂", "山楂类小食"),
-        ("饼", "饼干/米饼类"),
-        ("饮", "饮品/冲调类"),
-        ("零食", "儿童零食/日常加餐"),
-    ]
-    return [label for key, label in mapping if key in text] or ["儿童食养 / 日常加餐"]
-
-
-def extract_user_questions(text):
-    rows = []
-    for line in text.splitlines():
-        if any(word in line for word in ["链接", "品牌", "牌子", "哪家", "怎么买", "几岁", "多大", "甜"]):
-            rows.append(line.strip())
-    return rows[:8]
-
-
-def build_risk_warnings(risk_hits):
-    warnings = ["不要宣称治疗、调理、改善疾病或替代医生建议"]
-    if risk_hits:
-        warnings.append("内部可记录积食/上火/脾胃等用户原话，对外要转译成配料、甜度、场景和适量表达")
-    return warnings
-
-
-def next_action(grade, fit, risk):
-    if grade.startswith("A") and fit == "高" and risk != "高":
-        return "进入复刻创作，先生成 3 个小羊森林安全表达选题"
-    if fit in ["高", "中"]:
-        return "先补产品证据，再进入复刻创作"
-    return "只入库观察，不作为近期复刻优先项"
-
-
-def merge_cases(db_cases, output_cases):
-    merged = {case["id"]: case for case in output_cases}
-    for case in db_cases:
-        case_id = case.get("id")
-        if not case_id:
+def get_inbox():
+    inbox = {}
+    if not ANALYSIS_INBOX_ROOT.exists():
+        return inbox
+    for folder in ANALYSIS_INBOX_ROOT.iterdir():
+        if not folder.is_dir():
             continue
-        if case_id not in merged:
-            merged[case_id] = attach_gpt_state(case)
-            continue
-        for key in ["url", "source", "project", "manualNote"]:
-            if case.get(key) not in ("", None, []):
-                merged[case_id][key] = case[key]
-        if case.get("status") == "失败":
-            merged[case_id]["status"] = "失败"
-            merged[case_id]["error"] = case.get("error", "")
-    return sorted([attach_gpt_state(case) for case in merged.values()], key=lambda x: x.get("createdAt", ""), reverse=True)
+        manifest = read_json(folder / "manifest.json", {})
+        status = read_json(folder / "status.json", {})
+        item = {
+            "id": manifest.get("id") or folder.name,
+            "folder": folder.name,
+            "noteId": manifest.get("note_id", ""),
+            "url": manifest.get("url", ""),
+            "sampleType": manifest.get("sample_type", ""),
+            "processMode": manifest.get("process_mode", ""),
+            "createdAt": manifest.get("created_at", ""),
+            "status": status.get("status") or manifest.get("status", ""),
+            "relativePath": f"analysis_inbox/{folder.name}",
+            "hasInput": (folder / "analysis_input.md").exists(),
+        }
+        inbox[item["id"]] = item
+        if item["noteId"]:
+            inbox[item["noteId"]] = item
+    return inbox
 
 
-def create_brief(case, product=None, insight=None):
-    product_name = product.get("name") if product else "待选择产品"
-    question = insight.get("text") if insight else "妈妈想知道宝宝零食怎么选才放心"
-    analysis = case.get("analysis", {})
-    brief = {
+def derive_missing(sample):
+    missing = []
+    st = sample.get("sampleType")
+    if st == "达人合作":
+        for key, label in [("product", "合作产品"), ("tracking", "数据追踪方式")]:
+            if not sample.get(key):
+                missing.append(label)
+        if sample.get("processMode") != "只登记" and not sample.get("cost"):
+            missing.append("合作花费")
+        if sample.get("tracking") in ["小红星可追踪", "平台可追踪"]:
+            for key, label in [("impressions", "曝光/播放"), ("itemClicks", "商品点击"), ("orders", "订单")]:
+                if not sample.get(key):
+                    missing.append(label)
+    elif st == "官号发布":
+        for key, label in [("product", "发布产品"), ("hasCart", "是否挂车"), ("objective", "发布目的")]:
+            if not sample.get(key):
+                missing.append(label)
+        if sample.get("hasCart") == "是":
+            for key, label in [("impressions", "曝光"), ("reads", "阅读/播放"), ("itemClicks", "商品点击"), ("orders", "订单/GMV")]:
+                if not sample.get(key):
+                    missing.append(label)
+    elif st == "市场参考":
+        if not sample.get("recordReason"):
+            missing.append("记录原因")
+        if not sample.get("note"):
+            missing.append("为什么想学它 / 想重点看什么")
+    return missing
+
+
+def attach_states(sample, inbox, results):
+    sid = sample.get("id", "")
+    note_id = sample.get("noteId", "")
+    item = inbox.get(sample.get("analysisPackageId", "")) or inbox.get(note_id) or inbox.get(sid)
+    result = None
+    if item:
+        result = results.get(item["id"]) or results.get(item["folder"])
+    if not result:
+        result = results.get(sample.get("analysisPackageId", "")) or results.get(sid)
+    sample["missing"] = derive_missing(sample)
+    sample["gpt"] = {"inbox": item, "result": result, "status": "已完成分析" if result else (item.get("status") if item else sample.get("status", "只登记"))}
+    return sample
+
+
+def run_analysis_task(task_id, sample_id, url, sample_meta):
+    task_path = TASK_ROOT / f"{task_id}.json"
+    db = load_db()
+    sample = next((x for x in db.get("samples", []) if x.get("id") == sample_id), None)
+    try:
+        write_json(task_path, {"id": task_id, "status": "正在抓取小红书内容", "updatedAt": now_text()})
+        analyzer = ROOT / "tools" / "xhs_analyzer.py"
+        subprocess.run([sys.executable, str(analyzer), "--url", url], cwd=ROOT, check=True)
+        note_id = note_id_from_url(url)
+        write_json(task_path, {"id": task_id, "status": "正在生成 GPT 分析包", "updatedAt": now_text()})
+        package_id = create_analysis_package(note_id, url, sample_meta)
+        package_dir = ANALYSIS_INBOX_ROOT / package_id
+        ok, msg = git_upload(package_dir)
+        db = load_db()
+        sample = next((x for x in db.get("samples", []) if x.get("id") == sample_id), None)
+        if sample:
+            sample["noteId"] = note_id
+            sample["analysisPackageId"] = package_id
+            sample["status"] = "待 GPT 分析" if ok else "分析包生成成功，GitHub 上传失败"
+            sample["updatedAt"] = now_text()
+            save_db(db)
+        write_json(task_path, {"id": task_id, "status": sample.get("status") if sample else "完成", "message": msg, "packageId": package_id, "updatedAt": now_text()})
+    except Exception as exc:
+        db = load_db()
+        sample = next((x for x in db.get("samples", []) if x.get("id") == sample_id), None)
+        if sample:
+            sample["status"] = "抓取/分析包生成失败"
+            sample["error"] = str(exc)
+            sample["updatedAt"] = now_text()
+            save_db(db)
+        write_json(task_path, {"id": task_id, "status": "失败", "error": str(exc), "updatedAt": now_text()})
+
+
+def create_sample(payload):
+    db = load_db()
+    url = payload.get("url", "").strip()
+    sample_type = payload.get("sampleType") or "市场参考"
+    process_mode = payload.get("processMode") or "只登记"
+    sample = {
         "id": uuid.uuid4().hex[:12],
+        "url": url,
+        "noteId": note_id_from_url(url),
+        "title": payload.get("title", ""),
+        "creator": payload.get("creator", ""),
+        "sampleType": sample_type,
+        "contentForm": payload.get("contentForm", "自动识别"),
+        "processMode": process_mode,
+        "recordReason": payload.get("recordReason", ""),
+        "product": payload.get("product", ""),
+        "collabType": payload.get("collabType", ""),
+        "cost": payload.get("cost", ""),
+        "tracking": payload.get("tracking", ""),
+        "initialJudgement": payload.get("initialJudgement", "不确定"),
+        "hasCart": payload.get("hasCart", ""),
+        "objective": payload.get("objective", ""),
+        "publishDate": payload.get("publishDate", ""),
+        "note": payload.get("note", ""),
+        "metrics": payload.get("metrics", {}),
+        "status": "只登记" if process_mode == "只登记" else ("待补数据" if process_mode == "等数据后分析" else "待抓取"),
         "createdAt": now_text(),
-        "sourceCaseId": case.get("id"),
-        "sourceTitle": case.get("title"),
-        "product": product_name,
-        "userQuestion": question,
-        "goal": "收藏 + 信任 + 评论问询",
-        "topic": f"{product_name}怎么做成一条妈妈愿意收藏的儿童食养选品笔记",
-        "titles": [
-            f"给宝宝选零食，我现在先看这 4 个细节",
-            f"不是所有宝宝零食都适合囤，先看配料和场景",
-            f"这类宝宝加餐，我会优先看甜度和配料表",
-        ],
-        "coverText": ["宝宝零食怎么选", "先看配料表", "日常加餐清单"],
-        "opening": "最近很多妈妈问宝宝日常加餐怎么选，我不会只看好不好吃，会先看配料、甜度、年龄和孩子接不接受。",
-        "structure": [
-            "先说人群：适合正在给孩子选日常加餐的妈妈",
-            "给出筛选标准：配料、甜度、口感、场景",
-            "逐个展示产品证据：包装、配料表、试吃反馈",
-            "结尾引导评论区：需要清单或年龄参考可以留言",
-        ],
-        "shots": ["产品合照", "包装近景", "配料表近景", "孩子试吃/日常场景", "评论区问题承接"],
-        "safeWords": analysis.get("safeExpression", []),
-        "riskWarnings": analysis.get("riskWarnings", []),
-        "status": "待写",
+        "updatedAt": now_text(),
     }
-    return brief
+    db["samples"].insert(0, sample)
+    save_db(db)
+    task_id = None
+    if process_mode == "完整分析" and url:
+        task_id = uuid.uuid4().hex[:10]
+        sample["taskId"] = task_id
+        sample["status"] = "正在抓取"
+        save_db(db)
+        thread = threading.Thread(target=run_analysis_task, args=(task_id, sample["id"], url, sample), daemon=True)
+        thread.start()
+    return {"sample": sample, "taskId": task_id}
 
 
-class WorkbenchHandler(SimpleHTTPRequestHandler):
-    server_version = "XiaoYangWorkbench/1.0"
+def make_product_card(payload):
+    raw = payload.get("raw", "")
+    name = payload.get("name", "").strip() or "未命名产品"
+    text = f"{name}\n{raw}"
+    def hits(words):
+        return [w for w in words if w in text]
+    card = {
+        "id": uuid.uuid4().hex[:10],
+        "name": name,
+        "category": payload.get("category", ""),
+        "forms": hits(PRODUCT_TAGS["forms"]),
+        "needs": hits(PRODUCT_TAGS["needs"]),
+        "timing": hits(PRODUCT_TAGS["timing"]),
+        "contentTags": hits(PRODUCT_TAGS["content"]),
+        "targetUser": payload.get("targetUser", ""),
+        "scenes": payload.get("scenes", ""),
+        "sellingPoints": payload.get("sellingPoints", ""),
+        "ingredients": payload.get("ingredients", ""),
+        "taste": payload.get("taste", ""),
+        "age": payload.get("age", ""),
+        "usage": payload.get("usage", ""),
+        "compliance": payload.get("compliance", ""),
+        "banned": payload.get("banned", ""),
+        "raw": raw,
+        "createdAt": now_text(),
+    }
+    return card
 
+
+class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
-        clean = urlparse(path).path
-        if clean == "/":
-            clean = "/index.html"
-        return str(STATIC_ROOT / clean.lstrip("/"))
+        parsed = urlparse(path)
+        clean = parsed.path.lstrip("/") or "index.html"
+        return str(STATIC_ROOT / clean)
 
-    def log_message(self, format, *args):
-        return
-
-    def send_json(self, data, code=200):
+    def send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def read_body(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0:
+        length = int(self.headers.get("Content-Length", 0))
+        if not length:
             return {}
-        text = self.rfile.read(length).decode("utf-8")
-        try:
-            return json.loads(text)
-        except Exception:
-            return parse_qs(text)
+        return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/bootstrap":
             db = load_db()
-            cases = merge_cases(db.get("cases", []), list_output_cases())
-            self.send_json({
-                "cases": cases,
-                "insights": db.get("insights", []),
-                "products": db.get("products", []),
-                "keywords": db.get("keywords", []),
-                "briefs": db.get("briefs", []),
-                "reviews": db.get("reviews", []),
-                "settings": db.get("settings", DEFAULT_DB["settings"]),
-            })
+            inbox = get_inbox()
+            results = get_results()
+            samples = [attach_states(dict(x), inbox, results) for x in db.get("samples", [])]
+            # Also surface GitHub analysis packages that are not yet registered as samples.
+            registered_packages = {x.get("analysisPackageId") for x in samples if x.get("analysisPackageId")}
+            for key, item in inbox.items():
+                if key != item.get("id") or item.get("id") in registered_packages:
+                    continue
+                if any(s.get("noteId") == item.get("noteId") for s in samples):
+                    continue
+                samples.append(attach_states({
+                    "id": item["id"],
+                    "url": item.get("url", ""),
+                    "noteId": item.get("noteId", ""),
+                    "title": item.get("url", "") or item["id"],
+                    "creator": "",
+                    "sampleType": item.get("sampleType") or "市场参考",
+                    "contentForm": "不确定",
+                    "processMode": item.get("processMode") or "完整分析",
+                    "status": item.get("status") or "待 GPT 分析",
+                    "createdAt": item.get("createdAt", ""),
+                    "updatedAt": item.get("createdAt", ""),
+                    "analysisPackageId": item["id"],
+                }, inbox, results))
+            self.send_json({**db, "samples": samples, "typeMeta": SAMPLE_TYPE_META, "productTags": PRODUCT_TAGS, "analysisResults": results})
             return
         if parsed.path == "/api/task":
             task_id = parse_qs(parsed.query).get("id", [""])[0]
-            self.send_json(read_json(TASK_ROOT / f"{task_id}.json", {"status": "missing"}))
+            self.send_json(read_json(TASK_ROOT / f"{task_id}.json", {"status": "未找到任务"}))
             return
-        if parsed.path == "/local-image":
-            image_path = parse_qs(parsed.query).get("path", [""])[0]
-            self.send_local_file(image_path)
-            return
-        if parsed.path == "/open-file":
-            file_path = parse_qs(parsed.query).get("path", [""])[0]
-            if file_path and Path(file_path).exists():
-                os.startfile(file_path)
-            body = "<html><body>已尝试打开本地文件，可以关闭这个页面。</body></html>".encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        super().do_GET()
+        return super().do_GET()
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        data = self.read_body()
-        if parsed.path == "/api/analyze":
-            self.send_json(start_analysis(data))
-            return
-        if parsed.path == "/api/insight":
-            self.send_json(add_insight(data))
+        payload = self.read_body()
+        if parsed.path in ["/api/sample", "/api/analyze"]:
+            self.send_json(create_sample(payload))
             return
         if parsed.path == "/api/product":
-            self.send_json(add_product(data))
+            db = load_db()
+            card = make_product_card(payload)
+            db["products"].insert(0, card)
+            save_db(db)
+            self.send_json({"product": card})
             return
-        if parsed.path == "/api/keywords":
-            self.send_json(add_keywords(data))
+        if parsed.path == "/api/voice":
+            db = load_db()
+            item = {"id": uuid.uuid4().hex[:10], "text": payload.get("text", ""), "source": payload.get("source", ""), "product": payload.get("product", ""), "type": payload.get("type", ""), "createdAt": now_text()}
+            db["voices"].insert(0, item)
+            save_db(db)
+            self.send_json({"voice": item})
             return
-        if parsed.path == "/api/brief":
-            self.send_json(add_brief(data))
+        if parsed.path == "/api/sample/update":
+            db = load_db()
+            sample_id = payload.get("id")
+            for item in db.get("samples", []):
+                if item.get("id") == sample_id:
+                    item.update({k: v for k, v in payload.items() if k != "id"})
+                    item["updatedAt"] = now_text()
+                    break
+            save_db(db)
+            self.send_json({"ok": True})
             return
-        if parsed.path == "/api/review":
-            self.send_json(add_review(data))
-            return
-        self.send_json({"error": "unknown endpoint"}, 404)
-
-    def send_local_file(self, file_path):
-        path = Path(file_path)
-        try:
-            resolved = path.resolve()
-            if not str(resolved).startswith(str(ROOT.resolve())):
-                raise ValueError("outside workspace")
-            if not resolved.exists():
-                raise FileNotFoundError(str(resolved))
-            data = resolved.read_bytes()
-            mime = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
-            self.send_response(200)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        except Exception:
-            self.send_response(404)
-            self.end_headers()
+        self.send_json({"error": "Not found"}, 404)
 
 
-def start_analysis(data):
-    url = str(data.get("url", "")).strip()
-    source = str(data.get("source", "市场样本")).strip() or "市场样本"
-    if not url:
-        return {"ok": False, "error": "请先粘贴小红书链接"}
-    note_id = note_id_from_url(url)
-    task_id = uuid.uuid4().hex[:12]
-    task = {
-        "id": task_id,
-        "noteId": note_id,
-        "url": url,
-        "source": source,
-        "status": "排队中",
-        "createdAt": now_text(),
-        "updatedAt": now_text(),
-        "log": ["任务已创建，准备读取小红书内容"],
-    }
-    write_task(task)
-    db = load_db()
-    if not any(case.get("id") == note_id for case in db["cases"]):
-        db["cases"].append({
-            "id": note_id,
-            "url": url,
-            "source": source,
-            "project": "小羊森林",
-            "title": "等待抓取",
-            "type": "未知",
-            "status": "分析中",
-            "createdAt": now_text(),
-            "manualNote": "",
-        })
-        save_db(db)
-    thread = threading.Thread(target=run_analysis_task, args=(task_id, url, note_id), daemon=True)
-    thread.start()
-    return {"ok": True, "task": task}
-
-
-def write_task(task):
-    task["updatedAt"] = now_text()
-    TASK_ROOT.mkdir(exist_ok=True)
-    (TASK_ROOT / f"{task['id']}.json").write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def run_analysis_task(task_id, url, note_id):
-    task = read_json(TASK_ROOT / f"{task_id}.json", {})
-    try:
-        task["status"] = "运行中"
-        task["log"].append("正在调用本地拆解工具，这一步可能需要几分钟")
-        write_task(task)
-        python = ROOT / ".venv" / "Scripts" / "python.exe"
-        script = ROOT / "tools" / "xhs_analyzer.py"
-        if not python.exists():
-            task["log"].append("正在准备本地环境")
-            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "run_xhs_analysis.ps1"), "-Url", url], cwd=str(ROOT), timeout=1800)
-        else:
-            proc = subprocess.run([str(python), str(script), "--url", url], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1800)
-            output = proc.stdout.decode("utf-8", errors="replace")
-            task["log"].extend(output.splitlines()[-12:])
-            if proc.returncode != 0:
-                raise RuntimeError(output[-1200:])
-        task["status"] = "已完成"
-        task["log"].append("拆解完成，已进入案例库")
-        update_case_after_task(note_id, url)
-        task["log"].append("正在生成 GPT 轻量分析包")
-        package = create_analysis_package(note_id, url)
-        task["gpt"] = {
-            "status": "已生成分析包",
-            "packageId": package["id"],
-            "relativePath": package["relativePath"],
-            "createdAt": package["createdAt"],
-        }
-        write_task(task)
-        task["log"].append(f"已生成分析包：{package['relativePath']}")
-        try:
-            sync_result = sync_analysis_package(package["id"])
-            task["gpt"]["status"] = "已上传 GitHub，等待 GPT 分析" if sync_result.get("uploaded") else "已生成分析包"
-            task["gpt"]["message"] = sync_result.get("message", "")
-            task["log"].append(sync_result.get("message", "已处理 GitHub 同步。"))
-        except Exception as sync_exc:
-            task["gpt"]["status"] = "GitHub 上传失败"
-            task["gpt"]["error"] = str(sync_exc)
-            task["log"].append(f"GitHub 上传失败：{sync_exc}")
-    except Exception as exc:
-        task["status"] = "失败"
-        task["error"] = str(exc)
-        task["log"].append(f"失败：{exc}")
-        mark_case_failed(note_id, str(exc))
-    write_task(task)
-
-
-def update_case_after_task(note_id, url):
-    output_case = next((case for case in list_output_cases() if case["id"] == note_id), None)
-    db = load_db()
-    db["cases"] = [case for case in db["cases"] if case.get("id") != note_id]
-    if output_case:
-        output_case["url"] = url
-        db["cases"].append(output_case)
-    save_db(db)
-
-
-def mark_case_failed(note_id, error):
-    db = load_db()
-    for case in db["cases"]:
-        if case.get("id") == note_id:
-            case["status"] = "失败"
-            case["error"] = error
-    save_db(db)
-
-
-def add_insight(data):
-    text = str(data.get("text", "")).strip()
-    if not text:
-        return {"ok": False, "error": "请先输入用户原话"}
-    db = load_db()
-    item = {
-        "id": uuid.uuid4().hex[:10],
-        "createdAt": now_text(),
-        "text": text,
-        "source": data.get("source", "评论区/私信"),
-        "product": data.get("product", ""),
-        "user": data.get("user", "不确定"),
-        "age": data.get("age", ""),
-        "emotion": classify_emotion(text),
-        "needType": classify_need(text),
-        "deepInsight": explain_insight(text),
-        "value": "高" if any(w in text for w in ["怕", "几岁", "太甜", "配料", "链接", "怎么买"]) else "中",
-        "risk": "高" if any(w in text for w in DEFAULT_DB["settings"]["risk_terms"]) else "低",
-        "topicSeed": build_topic_seed(text),
-    }
-    db["insights"].insert(0, item)
-    save_db(db)
-    return {"ok": True, "item": item}
-
-
-def classify_emotion(text):
-    if any(w in text for w in ["怕", "担心", "不敢", "焦虑"]):
-        return "焦虑"
-    if any(w in text for w in ["链接", "怎么买", "哪里买", "求"]):
-        return "求推荐/求链接"
-    if any(w in text for w in ["真的吗", "确定", "会不会"]):
-        return "质疑"
-    return "观察/需求"
-
-
-def classify_need(text):
-    checks = [
-        (["配料", "添加", "成分"], "成分安全"),
-        (["甜", "糖"], "甜度/口味"),
-        (["几岁", "多大", "年龄"], "年龄适配"),
-        (["链接", "怎么买", "哪里买"], "购买转化"),
-        (["出门", "幼儿园", "加餐", "饭后"], "使用场景"),
-        (["上火", "积食", "脾胃"], "内部食养关注"),
-    ]
-    for words, label in checks:
-        if any(w in text for w in words):
-            return label
-    return "未分类需求"
-
-
-def explain_insight(text):
-    if "甜" in text or "糖" in text:
-        return "表层在问甜度，深层是担心孩子摄入负担和日常食用频率。"
-    if "几岁" in text or "多大" in text:
-        return "表层在问年龄，深层是怕买错、怕不适合孩子当前阶段。"
-    if "配料" in text or "添加" in text:
-        return "表层在看成分，深层是需要一个能快速判断安全感的选品标准。"
-    if "链接" in text or "怎么买" in text:
-        return "用户已经进入购买决策，需要评论区承接和产品信息清晰。"
-    if any(w in text for w in ["上火", "积食", "脾胃"]):
-        return "这是高价值原话，但对外表达要转译成配料简单、口感温和、适量加餐等安全说法。"
-    return "这条原话可以先入库，后续和相似问题合并判断选题价值。"
-
-
-def build_topic_seed(text):
-    if "甜" in text or "糖" in text:
-        return "宝宝零食怎么判断甜度是否适合日常加餐"
-    if "几岁" in text or "多大" in text:
-        return "不同年龄段宝宝零食选择时先看哪些信息"
-    if "配料" in text:
-        return "妈妈看配料表选宝宝零食的 4 个重点"
-    if any(w in text for w in ["上火", "积食", "脾胃"]):
-        return "孩子日常加餐怎么选得更轻负担"
-    return "从用户原话延展一个妈妈选品问题"
-
-
-def add_product(data):
-    name = str(data.get("name", "")).strip()
-    if not name:
-        return {"ok": False, "error": "请先填写产品名称"}
-    db = load_db()
-    raw = str(data.get("raw", "")).strip()
-    item = {
-        "id": uuid.uuid4().hex[:10],
-        "createdAt": now_text(),
-        "name": name,
-        "series": data.get("series", ""),
-        "foodType": data.get("foodType", "普通食品/待确认"),
-        "form": data.get("form", infer_form(name + raw)),
-        "internalDirections": infer_internal_directions(name + raw),
-        "safeExpressions": infer_safe_expressions(name + raw),
-        "age": data.get("age", ""),
-        "scenes": infer_scenes(name + raw),
-        "ingredients": data.get("ingredients", ""),
-        "sellingPoints": data.get("sellingPoints", ""),
-        "riskTerms": [term for term in DEFAULT_DB["settings"]["risk_terms"] if term in raw],
-        "proofs": data.get("proofs", ""),
-        "missing": infer_missing(data),
-        "confidence": "中" if raw or data.get("ingredients") else "低",
-        "unclassified": raw,
-        "status": "需要确认",
-    }
-    db["products"].insert(0, item)
-    save_db(db)
-    return {"ok": True, "item": item}
-
-
-def infer_form(text):
-    for key, label in [("饮", "饮品"), ("奶酪", "奶酪脆"), ("苹果", "果干"), ("山楂", "山楂类"), ("饼", "饼干/米饼")]:
-        if key in text:
-            return label
-    return "待识别"
-
-
-def infer_internal_directions(text):
-    directions = []
-    for key, label in [("上火", "上火关注"), ("脾胃", "脾胃关注"), ("积食", "积食关注"), ("低糖", "低糖零食"), ("出门", "出门携带"), ("加餐", "日常加餐")]:
-        if key in text:
-            directions.append(label)
-    return directions or ["日常加餐"]
-
-
-def infer_safe_expressions(text):
-    words = []
-    for key in ["配料简单", "甜度适中", "口感温和", "出门方便", "日常加餐"]:
-        if key in text:
-            words.append(key)
-    if "低糖" in text:
-        words.append("甜度适中")
-    if "配料" in text:
-        words.append("配料表清晰")
-    return sorted(set(words or ["配料简单", "日常加餐"]))
-
-
-def infer_scenes(text):
-    scenes = []
-    for key, label in [("早餐", "早餐"), ("饭后", "饭后小食"), ("出门", "出门携带"), ("幼儿园", "幼儿园"), ("加餐", "下午加餐")]:
-        if key in text:
-            scenes.append(label)
-    return scenes or ["日常加餐"]
-
-
-def infer_missing(data):
-    missing = []
-    for key, label in [("age", "适用年龄"), ("ingredients", "配料表"), ("proofs", "证明素材"), ("sellingPoints", "可说卖点")]:
-        if not data.get(key):
-            missing.append(label)
-    return missing
-
-
-def add_keywords(data):
-    text = str(data.get("text", "")).strip()
-    if not text:
-        return {"ok": False, "error": "请粘贴关键词或表格内容"}
-    rows = parse_keyword_text(text)
-    db = load_db()
-    db["keywords"] = rows + db["keywords"]
-    save_db(db)
-    return {"ok": True, "items": rows}
-
-
-def parse_keyword_text(text):
-    rows = []
-    sample = text.replace("\ufeff", "")
-    try:
-        dialect = csv.Sniffer().sniff(sample[:1000], delimiters=",\t;，")
-        reader = csv.DictReader(sample.splitlines(), dialect=dialect)
-        for row in reader:
-            rows.append(normalize_keyword_row(row))
-    except Exception:
-        for line in sample.splitlines():
-            parts = re.split(r"[\t,， ]+", line.strip())
-            if parts and parts[0]:
-                rows.append(normalize_keyword_row({"关键词": parts[0], "搜索热度": parts[1] if len(parts) > 1 else ""}))
-    return [row for row in rows if row.get("keyword")][:200]
-
-
-def normalize_keyword_row(row):
-    keyword = first_value(row, ["关键词", "keyword", "词", "搜索词"])
-    heat = first_value(row, ["搜索热度", "热度", "search", "heat"])
-    notes = first_value(row, ["笔记数", "内容数", "竞争度", "notes"])
-    item = {
-        "id": uuid.uuid4().hex[:10],
-        "createdAt": now_text(),
-        "keyword": keyword,
-        "type": classify_keyword(keyword),
-        "heat": heat,
-        "noteCount": notes,
-        "competition": "待判断",
-        "opportunity": keyword_opportunity(keyword, heat, notes),
-        "product": "",
-        "topic": keyword_topic(keyword),
-        "risk": "高" if any(term in keyword for term in DEFAULT_DB["settings"]["risk_terms"]) else "低",
-        "priority": "A" if any(w in keyword for w in ["宝宝", "儿童", "零食", "配料", "低糖"]) else "B",
-    }
-    return item
-
-
-def first_value(row, keys):
-    for key in keys:
-        if key in row and str(row[key]).strip():
-            return str(row[key]).strip()
-    return ""
-
-
-def classify_keyword(keyword):
-    if any(w in keyword for w in ["1岁", "2岁", "3岁", "一岁", "年龄"]):
-        return "年龄词"
-    if any(w in keyword for w in ["出门", "幼儿园", "加餐", "早餐", "饭后"]):
-        return "场景词"
-    if any(w in keyword for w in ["配料", "无添加", "低糖", "甜"]):
-        return "成分焦虑词"
-    if any(w in keyword for w in ["小羊森林", "小鹿蓝蓝", "秋田满满", "宝宝馋了"]):
-        return "品牌/竞品词"
-    return "品类词"
-
-
-def keyword_opportunity(keyword, heat, notes):
-    if any(w in keyword for w in ["配料", "怎么选", "低糖", "无添加", "几岁"]):
-        return "可直接转成选题"
-    return "先观察搜索趋势"
-
-
-def keyword_topic(keyword):
-    if "怎么选" in keyword:
-        return f"围绕“{keyword}”做选品标准型笔记"
-    if "低糖" in keyword or "配料" in keyword:
-        return f"围绕“{keyword}”做配料表/甜度判断笔记"
-    return f"围绕“{keyword}”做清单或测评笔记"
-
-
-def add_brief(data):
-    db = load_db()
-    cases = merge_cases(db.get("cases", []), list_output_cases())
-    case = next((c for c in cases if c.get("id") == data.get("caseId")), cases[0] if cases else None)
-    if not case:
-        return {"ok": False, "error": "还没有可用案例"}
-    product = next((p for p in db["products"] if p.get("id") == data.get("productId")), None)
-    insight = next((i for i in db["insights"] if i.get("id") == data.get("insightId")), None)
-    brief = create_brief(case, product, insight)
-    db["briefs"].insert(0, brief)
-    save_db(db)
-    return {"ok": True, "item": brief}
-
-
-def add_review(data):
-    title = str(data.get("title", "")).strip()
-    url = str(data.get("url", "")).strip()
-    if not title and not url:
-        return {"ok": False, "error": "请至少填写标题或链接"}
-    likes = int_value(data.get("likes"))
-    collects = int_value(data.get("collects"))
-    comments = int_value(data.get("comments"))
-    publish_date = str(data.get("publishDate", "")).strip()
-    objective = str(data.get("objective", "")).strip() or "未填写"
-    comment_text = str(data.get("commentText", "")).strip()
-    review = build_review(
-        title=title or note_id_from_url(url),
-        url=url,
-        publish_date=publish_date,
-        objective=objective,
-        likes=likes,
-        collects=collects,
-        comments=comments,
-        comment_text=comment_text,
-        manual_conclusion=str(data.get("manualConclusion", "")).strip(),
-    )
-    db = load_db()
-    db["reviews"].insert(0, review)
-    save_db(db)
-    return {"ok": True, "item": review}
-
-
-def build_review(title, url, publish_date, objective, likes, collects, comments, comment_text, manual_conclusion):
-    save_ratio = ratio(collects, likes)
-    comment_ratio = ratio(comments, likes)
-    question_count = keyword_hits(comment_text, ["链接", "怎么买", "哪里", "几岁", "多大", "甜", "配料", "牌子", "品牌"])
-    concern_count = keyword_hits(comment_text, DEFAULT_DB["settings"]["risk_terms"] + ["怕", "担心", "太甜", "添加"])
-    if save_ratio >= 0.45 or question_count >= 4:
-        result = "成功样本"
-    elif save_ratio >= 0.25 or comment_ratio >= 0.08 or question_count >= 2:
-        result = "观察样本"
-    else:
-        result = "待优化样本"
-    if likes == 0 and collects == 0 and comments == 0:
-        result = "数据待补"
-
-    learning = []
-    if save_ratio >= 0.45:
-        learning.append("收藏比高，说明内容具备清单、标准或购买决策价值。")
-    elif likes:
-        learning.append("收藏比还不够高，下一条要加强清单密度、配料表证据或年龄/场景标准。")
-    if question_count >= 2:
-        learning.append("评论区出现购买/年龄/配料追问，说明内容已经触发决策需求。")
-    if concern_count:
-        learning.append("评论里有食养或安全焦虑，后续要用安全表达承接，不要写功效承诺。")
-    if not learning:
-        learning.append("先积累 24 小时、72 小时和 7 天数据，再判断真实表现。")
-
-    next_action = "继续做同结构变体" if result == "成功样本" else "保留选题，重做标题/封面/证据" if result == "观察样本" else "暂不复刻，先找失败原因"
-    return {
-        "id": uuid.uuid4().hex[:10],
-        "createdAt": now_text(),
-        "title": title,
-        "url": url,
-        "publishDate": publish_date,
-        "objective": objective,
-        "metrics": {
-            "likes": likes,
-            "collects": collects,
-            "comments": comments,
-            "saveRatio": save_ratio,
-            "commentRatio": comment_ratio,
-        },
-        "commentText": comment_text,
-        "questionCount": question_count,
-        "concernCount": concern_count,
-        "result": result,
-        "learning": learning,
-        "nextAction": next_action,
-        "manualConclusion": manual_conclusion,
-    }
-
-
-def main():
+def run():
     ensure_dirs()
     port = int(os.environ.get("XIAOYANG_WORKBENCH_PORT", "8765"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), WorkbenchHandler)
-    print(f"小羊森林内容工作台已启动：http://127.0.0.1:{port}")
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print(f"小红书内容样本与合作复盘工作台已启动：http://127.0.0.1:{port}")
     server.serve_forever()
 
 
 if __name__ == "__main__":
-    main()
+    run()
