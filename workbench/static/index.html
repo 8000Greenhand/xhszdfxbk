@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>小羊森林内容工作台</title>
+    <title>小红书内容样本与合作复盘工作台</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   </head>
@@ -13,205 +13,127 @@
         <div class="mark">羊</div>
         <div>
           <strong>小羊森林</strong>
-          <span>内容增长工作台</span>
+          <span>内容样本与合作复盘</span>
         </div>
       </div>
       <nav>
-        <button class="nav-button active" data-view="inbox"><i data-lucide="link"></i><span>链接任务</span></button>
-        <button class="nav-button" data-view="library"><i data-lucide="database"></i><span>案例库</span></button>
-        <button class="nav-button" data-view="analysis"><i data-lucide="scan-search"></i><span>单条拆解</span></button>
-        <button class="nav-button" data-view="insights"><i data-lucide="message-square-text"></i><span>用户原话</span></button>
-        <button class="nav-button" data-view="products"><i data-lucide="package-check"></i><span>产品库</span></button>
-        <button class="nav-button" data-view="keywords"><i data-lucide="chart-no-axes-column"></i><span>关键词</span></button>
-        <button class="nav-button" data-view="briefs"><i data-lucide="file-pen-line"></i><span>创作任务</span></button>
-        <button class="nav-button" data-view="reviews"><i data-lucide="rotate-ccw-square"></i><span>发布复盘</span></button>
+        <button class="nav-button active" data-view="add"><i data-lucide="plus-circle"></i><span>添加样本</span></button>
+        <button class="nav-button" data-view="market"><i data-lucide="radar"></i><span>市场参考样本</span></button>
+        <button class="nav-button" data-view="kol"><i data-lucide="users"></i><span>达人合作笔记</span></button>
+        <button class="nav-button" data-view="official"><i data-lucide="store"></i><span>官号发布笔记</span></button>
+        <button class="nav-button" data-view="missing"><i data-lucide="badge-alert"></i><span>待补资料</span></button>
+        <button class="nav-button" data-view="results"><i data-lucide="file-search"></i><span>GPT 分析结果</span></button>
+        <button class="nav-button" data-view="products"><i data-lucide="package-check"></i><span>产品资料库</span></button>
+        <button class="nav-button" data-view="voices"><i data-lucide="message-square-text"></i><span>用户原声库</span></button>
       </nav>
     </aside>
 
     <main>
       <header class="topbar">
         <div>
-          <p class="eyebrow">母婴 / 儿童食养 / 小红书</p>
-          <h1 id="viewTitle">链接任务</h1>
+          <p class="eyebrow">小红书 / 市场样本 / 达人种草 / 官号转化</p>
+          <h1 id="viewTitle">添加样本</h1>
         </div>
-        <div class="status-pill"><i data-lucide="shield-check"></i><span>默认合规安全表达</span></div>
+        <div class="status-pill"><i data-lucide="workflow"></i><span>登记 → 补资料 → GPT分析 → 复盘/转译</span></div>
       </header>
 
-      <section class="view active" id="view-inbox">
+      <section class="view active" id="view-add">
         <div class="grid two">
           <section class="panel">
             <div class="panel-head">
-              <h2>输入小红书链接</h2>
-              <span>A/B/C/D 先判断，再拆解</span>
+              <div>
+                <h2>添加一条小红书样本</h2>
+                <span>先登记清楚，再决定是否完整分析。</span>
+              </div>
             </div>
-            <label class="field">
-              <span>链接</span>
-              <textarea id="urlInput" rows="5" placeholder="粘贴小红书笔记链接"></textarea>
-            </label>
-            <div class="row">
-              <label class="field compact">
-                <span>内容来源</span>
-                <select id="sourceInput">
-                  <option>市场样本</option>
-                  <option>我们已发布</option>
-                  <option>反面样本</option>
-                  <option>用户推荐</option>
-                </select>
-              </label>
-              <button class="primary" id="startAnalyze"><i data-lucide="play"></i><span>开始分析</span></button>
+            <label class="field"><span>笔记链接</span><textarea id="urlInput" rows="3" placeholder="粘贴小红书笔记链接"></textarea></label>
+            <div class="form-grid">
+              <label class="field"><span>样本类型</span><select id="sampleType"><option>市场参考</option><option>达人合作</option><option>官号发布</option></select></label>
+              <label class="field"><span>内容形式</span><select id="contentForm"><option>自动识别</option><option>图文</option><option>视频</option><option>不确定</option></select></label>
+              <label class="field"><span>处理方式</span><select id="processMode"><option>只登记</option><option>完整分析</option><option>等数据后分析</option></select></label>
+              <label class="field"><span>标题（抓不到时手填）</span><input id="titleInput" placeholder="可选" /></label>
             </div>
-            <div class="task-log" id="taskLog">等待任务</div>
-            <div class="gpt-status-card" id="gptTaskStatus">
-              <strong>GPT 分析状态</strong>
-              <span>未上传</span>
+
+            <div class="conditional" data-for="市场参考">
+              <div class="section-title">市场参考补充</div>
+              <div class="form-grid">
+                <label class="field"><span>记录原因</span><select id="recordReason"><option value="">未选择</option><option>爆款</option><option>竞品</option><option>跨领域参考</option><option>封面好</option><option>标题好</option><option>结构好</option><option>评论好</option></select></label>
+                <label class="field"><span>相关产品</span><input id="marketProduct" placeholder="可能承接哪个产品，可选" /></label>
+              </div>
             </div>
+
+            <div class="conditional hidden" data-for="达人合作">
+              <div class="section-title">达人合作补充</div>
+              <div class="form-grid">
+                <label class="field"><span>达人名称</span><input id="creatorInput" placeholder="达人/账号名" /></label>
+                <label class="field"><span>合作产品</span><input id="kolProduct" placeholder="四神饮 / 玉屏乌梅饮 / 其他" /></label>
+                <label class="field"><span>合作花费</span><input id="costInput" placeholder="如 3000；不知道可空" /></label>
+                <label class="field"><span>合作形式</span><select id="collabType"><option value="">未选择</option><option>付费</option><option>置换</option><option>佣金</option><option>混合</option><option>不确定</option></select></label>
+                <label class="field"><span>数据追踪方式</span><select id="tracking"><option value="">未选择</option><option>小红星可追踪</option><option>平台可追踪</option><option>达人后台截图</option><option>仅公开数据</option><option>暂无数据</option></select></label>
+                <label class="field"><span>你的初步判断</span><select id="initialJudgement"><option>不确定</option><option>感觉不错</option><option>感觉一般</option><option>感觉不好</option></select></label>
+              </div>
+            </div>
+
+            <div class="conditional hidden" data-for="官号发布">
+              <div class="section-title">官号发布补充</div>
+              <div class="form-grid">
+                <label class="field"><span>发布产品</span><input id="officialProduct" placeholder="对应产品" /></label>
+                <label class="field"><span>是否挂车</span><select id="hasCart"><option value="">未选择</option><option>是</option><option>否</option></select></label>
+                <label class="field"><span>发布目的</span><select id="objective"><option value="">未选择</option><option>拉新</option><option>搜索承接</option><option>转化</option><option>节点</option><option>测试</option></select></label>
+                <label class="field"><span>发布时间</span><input id="publishDate" placeholder="如 2026-06-09，可选" /></label>
+              </div>
+            </div>
+
+            <label class="field"><span>你的备注</span><textarea id="noteInput" rows="5" placeholder="例如：这个是跨领域的，但我想学封面；这条达人合作我不知道好不好，等数据出来再判断；这个链接只想先登记。"></textarea></label>
+            <button class="primary" id="submitSample"><i data-lucide="save"></i><span>保存样本</span></button>
+            <div class="task-log" id="taskLog">等待操作</div>
           </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2>第一版判断原则</h2>
-              <span>只为小羊森林服务</span>
-            </div>
+
+          <section class="panel muted-panel">
+            <div class="panel-head"><h2>v2 判断原则</h2><span>不再用一个“爆款模板”套所有内容</span></div>
             <div class="decision-list">
-              <div><strong>是否值得分析</strong><span>用收藏比、评论比、购买问询和证据完整度判断。</span></div>
-              <div><strong>是否适合复刻</strong><span>爆点必须能被小羊森林用产品证据承接。</span></div>
-              <div><strong>是否安全表达</strong><span>内部识别食养关注，对外转成配料、甜度、场景和适量。</span></div>
+              <div><strong>市场参考</strong><span>重点看：为什么吸引、为什么收藏、评论需求、结构能不能转成小羊森林内容。</span></div>
+              <div><strong>达人合作</strong><span>重点看：种草质量、人群匹配、评论信号、数据追踪完整度、花费性价比、是否复投。</span></div>
+              <div><strong>官号发布</strong><span>重点看：封面标题、第一页承接、商品点击、订单/GMV、下一篇怎么改。</span></div>
+              <div class="danger-soft"><strong>红色待补资料</strong><span>资料不足时不硬猜，先提示你补合作产品、花费、曝光、点击、订单等关键数据。</span></div>
             </div>
           </section>
         </div>
       </section>
 
-      <section class="view" id="view-library">
-        <div class="toolbar">
-          <input id="caseSearch" placeholder="搜索标题、作者、爆款类型、用户问题" />
-          <select id="caseFilter">
-            <option value="">全部优先级</option>
-            <option value="A">A 完整拆解</option>
-            <option value="B">B 轻量拆解</option>
-            <option value="C">C 记录观察</option>
-            <option value="D">D 暂不建议</option>
-          </select>
-        </div>
-        <div class="case-table" id="caseTable"></div>
-      </section>
-
-      <section class="view" id="view-analysis">
-        <div id="analysisEmpty" class="empty">先在案例库选择一条内容。</div>
-        <div id="analysisDetail" class="analysis-detail hidden"></div>
-      </section>
-
-      <section class="view" id="view-insights">
-        <div class="grid two">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>添加用户原话</h2>
-              <span>评论、私信、群聊、线下反馈都可以</span>
-            </div>
-            <label class="field"><span>原话</span><textarea id="insightText" rows="5" placeholder="例如：这个几岁能吃？我怕太甜了。"></textarea></label>
-            <div class="row">
-              <input id="insightSource" placeholder="来源，可选" />
-              <input id="insightProduct" placeholder="对应产品，可选" />
-              <button class="primary" id="addInsight"><i data-lucide="plus"></i><span>入库</span></button>
-            </div>
-          </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2>洞察列表</h2>
-              <span id="insightCount">0 条</span>
-            </div>
-            <div class="stack" id="insightList"></div>
-          </section>
-        </div>
-      </section>
+      <section class="view" id="view-market"><div class="table-head"><h2>市场参考样本</h2><input id="marketSearch" placeholder="搜索标题、备注、产品" /></div><div id="marketTable" class="sample-list"></div></section>
+      <section class="view" id="view-kol"><div class="table-head"><h2>达人合作笔记</h2><input id="kolSearch" placeholder="搜索达人、产品、链接、备注" /></div><div id="kolTable" class="sample-list"></div></section>
+      <section class="view" id="view-official"><div class="table-head"><h2>官号发布笔记</h2><input id="officialSearch" placeholder="搜索标题、产品、目的" /></div><div id="officialTable" class="sample-list"></div></section>
+      <section class="view" id="view-missing"><div class="table-head"><h2>待补资料</h2><span>这些资料会显著影响 GPT 判断，优先补。</span></div><div id="missingList" class="missing-list"></div></section>
+      <section class="view" id="view-results"><div class="table-head"><h2>GPT 分析结果</h2><span>先看结论卡，再看长文。</span></div><div id="resultList" class="result-list"></div></section>
 
       <section class="view" id="view-products">
         <div class="grid two">
           <section class="panel">
-            <div class="panel-head">
-              <h2>添加产品资料</h2>
-              <span>资料混乱也可以，先放进来</span>
+            <div class="panel-head"><h2>添加产品资料</h2><span>PPT/文档内容可先粘贴，第一版整理成轻量产品卡。</span></div>
+            <div class="form-grid">
+              <label class="field"><span>产品名称</span><input id="productName" placeholder="四神饮 / 玉屏乌梅饮 / 其他" /></label>
+              <label class="field"><span>产品分类</span><input id="productCategory" placeholder="如 儿童食养饮品" /></label>
+              <label class="field"><span>适用年龄</span><input id="productAge" placeholder="如 1岁+" /></label>
+              <label class="field"><span>口味</span><input id="productTaste" placeholder="如 酸酸甜甜" /></label>
             </div>
-            <div class="row">
-              <input id="productName" placeholder="产品名称" />
-              <input id="productAge" placeholder="适用年龄，可选" />
-            </div>
-            <textarea id="productRaw" rows="7" placeholder="粘贴配料表、详情页、卖点、客服话术、备注等"></textarea>
-            <button class="primary" id="addProduct"><i data-lucide="package-plus"></i><span>整理成产品卡</span></button>
+            <label class="field"><span>核心场景</span><input id="productScenes" placeholder="如 饭后、出门、日常加餐" /></label>
+            <label class="field"><span>卖点 / 配方 / 注意事项 / 禁止表达</span><textarea id="productRaw" rows="8" placeholder="直接粘贴产品手册、详情页、客服话术、PPT整理文字等"></textarea></label>
+            <button class="primary" id="addProduct"><i data-lucide="package-plus"></i><span>生成产品卡</span></button>
           </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2>产品库</h2>
-              <span id="productCount">0 个</span>
-            </div>
-            <div class="stack" id="productList"></div>
-          </section>
+          <section class="panel"><div class="panel-head"><h2>产品卡</h2><span id="productCount">0 个</span></div><div id="productList" class="stack"></div></section>
         </div>
       </section>
 
-      <section class="view" id="view-keywords">
+      <section class="view" id="view-voices">
         <div class="grid two">
           <section class="panel">
-            <div class="panel-head">
-              <h2>导入关键词</h2>
-              <span>可直接粘贴 CSV / 表格内容</span>
-            </div>
-            <textarea id="keywordText" rows="10" placeholder="关键词,搜索热度,笔记数&#10;宝宝零食怎么选,12000,800&#10;宝宝零食低糖,8300,420"></textarea>
-            <button class="primary" id="addKeywords"><i data-lucide="upload"></i><span>导入并分类</span></button>
+            <div class="panel-head"><h2>添加用户原声</h2><span>评论、私信、客服、达人评论都可以。</span></div>
+            <label class="field"><span>原声内容</span><textarea id="voiceText" rows="6" placeholder="例如：有没有链接？几岁能喝？怕太甜。"></textarea></label>
+            <div class="form-grid"><label class="field"><span>来源</span><input id="voiceSource" placeholder="笔记/客服/评论区" /></label><label class="field"><span>关联产品</span><input id="voiceProduct" placeholder="可选" /></label></div>
+            <button class="primary" id="addVoice"><i data-lucide="plus"></i><span>保存原声</span></button>
           </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2>关键词机会</h2>
-              <span id="keywordCount">0 个</span>
-            </div>
-            <div class="keyword-grid" id="keywordList"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="view" id="view-briefs">
-        <div class="panel">
-          <div class="panel-head">
-            <h2>从案例生成创作任务</h2>
-            <span>把爆文拆解变成可拍、可写、可复盘的任务</span>
-          </div>
-          <div class="row">
-            <select id="briefCase"></select>
-            <select id="briefProduct"></select>
-            <select id="briefInsight"></select>
-            <button class="primary" id="addBrief"><i data-lucide="wand-sparkles"></i><span>生成任务</span></button>
-          </div>
-        </div>
-        <div class="brief-list" id="briefList"></div>
-      </section>
-
-      <section class="view" id="view-reviews">
-        <div class="grid two">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>录入已发布笔记</h2>
-              <span>把自己的结果回流进系统</span>
-            </div>
-            <label class="field"><span>标题</span><input id="reviewTitle" placeholder="我们发布的笔记标题" /></label>
-            <label class="field"><span>链接</span><input id="reviewUrl" placeholder="小红书链接，可选" /></label>
-            <div class="row">
-              <input id="reviewDate" placeholder="发布时间，例如 2026-06-09" />
-              <input id="reviewObjective" placeholder="目标：收藏/评论/转化/信任" />
-            </div>
-            <div class="row">
-              <input id="reviewLikes" placeholder="点赞" />
-              <input id="reviewCollects" placeholder="收藏" />
-              <input id="reviewComments" placeholder="评论" />
-            </div>
-            <textarea id="reviewCommentText" rows="5" placeholder="粘贴有代表性的评论原话，可选"></textarea>
-            <textarea id="reviewConclusion" rows="3" placeholder="你的人工判断，可选"></textarea>
-            <button class="primary" id="addReview"><i data-lucide="save"></i><span>保存复盘</span></button>
-          </section>
-          <section class="panel">
-            <div class="panel-head">
-              <h2>复盘结果</h2>
-              <span id="reviewCount">0 条</span>
-            </div>
-            <div class="stack" id="reviewList"></div>
-          </section>
+          <section class="panel"><div class="panel-head"><h2>原声列表</h2><span id="voiceCount">0 条</span></div><div id="voiceList" class="stack"></div></section>
         </div>
       </section>
     </main>
