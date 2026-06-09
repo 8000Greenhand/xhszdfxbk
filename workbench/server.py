@@ -389,6 +389,11 @@ def ensure_only_analysis_dirty():
 def sync_analysis_package(package_id):
     ensure_only_analysis_dirty()
     rel = f"analysis_inbox/{package_id}"
+    status_path = ANALYSIS_INBOX_ROOT / package_id / "status.json"
+    status = read_json(status_path, {})
+    status["status"] = "已上传 GitHub，等待 GPT 分析"
+    status["updated_at"] = now_text()
+    write_json(status_path, status)
     subprocess.run(["git", "add", rel], cwd=str(ROOT), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", rel], cwd=str(ROOT))
     if staged.returncode == 0:
