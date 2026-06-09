@@ -39,6 +39,27 @@ function viewFile(path) {
   return path.replaceAll("\\", "/");
 }
 
+function renderGptTaskStatus(gpt) {
+  const el = $("#gptTaskStatus");
+  if (!el) return;
+  if (!gpt) {
+    el.innerHTML = `<strong>GPT 分析状态</strong><span>未上传</span>`;
+    return;
+  }
+  el.innerHTML = `
+    <strong>GPT 分析状态</strong>
+    <span>${esc(gpt.status || "未上传")}</span>
+    ${gpt.packageId ? `<small>分析包 ID：${esc(gpt.packageId)}</small>` : ""}
+    ${gpt.relativePath ? `<small>GitHub 路径：${esc(gpt.relativePath)}</small>` : ""}
+    ${gpt.createdAt ? `<small>生成时间：${esc(gpt.createdAt)}</small>` : ""}
+    <em>回到 GPT 说：分析最新一条</em>
+  `;
+}
+
+function renderMarkdownText(text) {
+  return esc(text || "").replace(/\n/g, "<br>");
+}
+
 async function load() {
   const data = await api("/api/bootstrap");
   Object.assign(state, data);
@@ -120,6 +141,23 @@ function renderAnalysis() {
   const a = item.analysis || {};
   const m = item.metrics || {};
   const img = item.files?.contactSheet ? `<img src="/local-image?path=${encodeURIComponent(item.files.contactSheet)}" alt="关键帧总览" />` : "";
+  const gpt = item.gpt || {};
+  const inbox = gpt.inbox || {};
+  const result = gpt.result || {};
+  const gptBlock = `
+    <section class="card">
+      <h3>GPT 分析状态</h3>
+      <ul>
+        <li>${esc(gpt.status || "未上传")}</li>
+        ${inbox.id ? `<li>分析包 ID：${esc(inbox.id)}</li>` : ""}
+        ${inbox.relativePath ? `<li>GitHub 路径：${esc(inbox.relativePath)}</li>` : ""}
+        ${inbox.createdAt ? `<li>生成时间：${esc(inbox.createdAt)}</li>` : ""}
+        ${result.relativePath ? `<li>结果路径：${esc(result.relativePath)}</li>` : ""}
+      </ul>
+      ${result.gptAnalysis ? `<div class="markdown-box">${renderMarkdownText(result.gptAnalysis)}</div>` : ""}
+      ${result.taskBrief ? `<div class="markdown-box">${renderMarkdownText(result.taskBrief)}</div>` : ""}
+    </section>
+  `;
   detail.innerHTML = `
     <section class="hero-panel">
       ${img}
@@ -139,6 +177,7 @@ function renderAnalysis() {
       </div>
     </section>
     <aside class="stack">
+      ${gptBlock}
       ${analysisCard("为什么值得看", [
         `内容价值：${a.valueType || "待判断"}`,
         `账号打法：${a.accountStrategy?.type || "待判断"}`,
@@ -276,6 +315,7 @@ async function pollTask(taskId) {
   state.taskTimer = setInterval(async () => {
     const task = await api(`/api/task?id=${encodeURIComponent(taskId)}`);
     $("#taskLog").textContent = `${task.status}\n${(task.log || []).join("\n")}`;
+    renderGptTaskStatus(task.gpt);
     if (["已完成", "失败", "missing"].includes(task.status)) {
       clearInterval(state.taskTimer);
       await load();
@@ -297,6 +337,7 @@ function bindEvents() {
       return;
     }
     $("#taskLog").textContent = "任务已开始";
+    renderGptTaskStatus(null);
     pollTask(result.task.id);
   });
   $("#addInsight").addEventListener("click", async () => {

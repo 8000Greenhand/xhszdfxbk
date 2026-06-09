@@ -19,6 +19,8 @@ OUTPUT_ROOT = ROOT / "outputs"
 DATA_ROOT = ROOT / "data"
 DB_PATH = DATA_ROOT / "workbench.json"
 TASK_ROOT = DATA_ROOT / "tasks"
+ANALYSIS_INBOX_ROOT = ROOT / "analysis_inbox"
+ANALYSIS_RESULTS_ROOT = ROOT / "analysis_results"
 
 
 DEFAULT_DB = {
@@ -44,6 +46,8 @@ def now_text():
 def ensure_dirs():
     DATA_ROOT.mkdir(exist_ok=True)
     TASK_ROOT.mkdir(exist_ok=True)
+    ANALYSIS_INBOX_ROOT.mkdir(exist_ok=True)
+    ANALYSIS_RESULTS_ROOT.mkdir(exist_ok=True)
     if not DB_PATH.exists():
         save_db(DEFAULT_DB)
 
@@ -81,6 +85,17 @@ def read_json(path, fallback=None):
         return fallback
 
 
+def write_json(path, data):
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_text_file(path, fallback=""):
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return fallback
+
+
 def rows_to_dict(rows):
     result = {}
     for row in rows or []:
@@ -99,6 +114,299 @@ def ratio(part, whole):
     return round(part / whole, 2) if whole else 0
 
 
+def safe_name(value):
+    text = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", str(value or "")).strip("_")
+    return text[:80] or datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def output_raw_path(folder, name):
+    return folder / "raw" / name
+
+
+def find_output_folder(note_id):
+    if not OUTPUT_ROOT.exists():
+        return None
+    direct = OUTPUT_ROOT / str(note_id)
+    if direct.exists():
+        return direct
+    folders = [p for p in OUTPUT_ROOT.iterdir() if p.is_dir()]
+    if not folders:
+        return None
+    return sorted(folders, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+
+
+def find_first_file(folder, patterns):
+    for pattern in patterns:
+        matches = list(folder.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
+def compact_transcript(folder):
+    rows = read_json(output_raw_path(folder, "transcript.json"), [])
+    if isinstance(rows, list) and rows:
+        lines = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text", "")).strip()
+            if text:
+                start = row.get("start", "")
+                lines.append(f"- {start}s {text}" if start != "" else f"- {text}")
+        return "\n".join(lines) if lines else "暂无口播转写。"
+    text_path = output_raw_path(folder, "口播转写.txt")
+    text = read_text_file(text_path).strip()
+    return text or "暂无口播转写。"
+
+
+def compact_ocr(folder):
+    rows = read_json(output_raw_path(folder, "ocr.json"), [])
+    seen = set()
+    lines = []
+    for row in rows if isinstance(rows, list) else []:
+        frame = row.get("frame", "") if isinstance(row, dict) else ""
+        for item in row.get("texts", []) if isinstance(row, dict) else []:
+            text = str(item.get("text", "")).strip()
+            if len(text) < 2:
+                continue
+            key = re.sub(r"\s+", "", text)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"- {frame}: {text}" if frame else f"- {text}")
+            if len(lines) >= 120:
+                break
+        if len(lines) >= 120:
+            break
+    return "\n".join(lines) if lines else "暂无 OCR 文字。"
+
+
+COMMENT_KEYWORDS = [
+    "链接", "怎么买", "哪里买", "哪家", "品牌", "牌子", "想买", "求", "价格",
+    "几岁", "多大", "宝宝", "孩子", "适合", "配料", "甜", "糖", "安全", "添加",
+    "健康", "焦虑", "怕", "不敢", "有没有", "是什么",
+]
+
+
+def digest_comments(comments, limit=30):
+    selected = []
+    fallback = []
+    for row in comments if isinstance(comments, list) else []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text", "")).strip()
+        if not text:
+            continue
+        item = {
+            "rank": row.get("rank", ""),
+            "author": row.get("author", ""),
+            "likes": row.get("likes", 0),
+            "text": text,
+        }
+        fallback.append(item)
+        if any(word in text for word in COMMENT_KEYWORDS):
+            selected.append(item)
+        if len(selected) >= limit:
+            break
+    rows = selected or fallback[:limit]
+    if not rows:
+        return "暂无高价值评论。"
+    return "\n".join(
+        f"- #{row.get('rank') or '-'} {row.get('author') or '未知'}：{row.get('text')}"
+        for row in rows[:limit]
+    )
+
+
+def markdown_list(title, rows):
+    value = str(rows or "").strip()
+    return f"## {title}\n\n{value if value else '暂无'}\n"
+
+
+def get_inbox_items():
+    items = {}
+    if not ANALYSIS_INBOX_ROOT.exists():
+        return items
+    for folder in ANALYSIS_INBOX_ROOT.iterdir():
+        if not folder.is_dir():
+            continue
+        manifest = read_json(folder / "manifest.json", {})
+        status = read_json(folder / "status.json", {})
+        inbox_id = manifest.get("id") or folder.name
+        note_id = manifest.get("note_id") or ""
+        item = {
+            "id": inbox_id,
+            "noteId": note_id,
+            "folder": folder.name,
+            "relativePath": f"analysis_inbox/{folder.name}",
+            "createdAt": manifest.get("created_at") or status.get("created_at") or "",
+            "status": status.get("status") or manifest.get("status") or "pending_gpt_analysis",
+            "resultFolder": status.get("result_folder", ""),
+            "manifest": manifest,
+        }
+        items[inbox_id] = item
+        if note_id:
+            items[note_id] = item
+    return items
+
+
+def get_result_items():
+    items = {}
+    if not ANALYSIS_RESULTS_ROOT.exists():
+        return items
+    for folder in ANALYSIS_RESULTS_ROOT.iterdir():
+        if not folder.is_dir():
+            continue
+        result = {
+            "folder": folder.name,
+            "relativePath": f"analysis_results/{folder.name}",
+            "gptAnalysis": read_text_file(folder / "gpt_analysis.md"),
+            "taskBrief": read_text_file(folder / "task_brief.md"),
+            "json": read_json(folder / "gpt_analysis.json", None),
+        }
+        items[folder.name] = result
+    return items
+
+
+def attach_gpt_state(case):
+    inbox_items = get_inbox_items()
+    result_items = get_result_items()
+    inbox = inbox_items.get(case.get("id", ""))
+    result = None
+    if inbox:
+        result = result_items.get(inbox.get("id")) or result_items.get(inbox.get("folder"))
+    result = result or result_items.get(case.get("id", ""))
+    if inbox and result:
+        inbox["status"] = "gpt_result_ready"
+    case["gpt"] = {
+        "status": "gpt_result_ready" if result else (inbox.get("status") if inbox else "not_uploaded"),
+        "inbox": inbox,
+        "result": result,
+    }
+    return case
+
+
+def create_analysis_package(note_id, url):
+    folder = find_output_folder(note_id)
+    if not folder:
+        raise RuntimeError("未找到本地抓取输出文件夹，无法生成 GPT 分析包。")
+    note = rows_to_dict(read_json(output_raw_path(folder, "note.json"), []))
+    comments = read_json(output_raw_path(folder, "comments.json"), [])
+    created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    package_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{safe_name(note_id or folder.name)}"
+    package_dir = ANALYSIS_INBOX_ROOT / package_id
+    package_dir.mkdir(parents=True, exist_ok=False)
+
+    metrics = {
+        "likes": int_value(note.get("likes")),
+        "collects": int_value(note.get("collects")),
+        "comments": int_value(note.get("comments")) or len(comments if isinstance(comments, list) else []),
+    }
+    manifest = {
+        "id": package_id,
+        "note_id": str(note_id or folder.name),
+        "url": url,
+        "created_at": created,
+        "title": note.get("title", ""),
+        "author": note.get("author", ""),
+        "metrics": metrics,
+        "status": "pending_gpt_analysis",
+    }
+    source = "\n".join([
+        "# GPT 待分析素材",
+        "",
+        f"- 链接：{url}",
+        f"- 标题：{note.get('title', '') or '未获取'}",
+        f"- 作者：{note.get('author', '') or '未获取'}",
+        f"- 发布时间：{note.get('publish_time', '') or note.get('time', '') or '未获取'}",
+        f"- 点赞：{metrics['likes']}",
+        f"- 收藏：{metrics['collects']}",
+        f"- 评论：{metrics['comments']}",
+        f"- 话题标签：{note.get('tags', '') or '未获取'}",
+        "",
+        "## 正文",
+        "",
+        note.get("content", "") or "未获取正文。",
+        "",
+        "## 初步可见信息",
+        "",
+        "本文件由本地工作台自动生成，只包含文字摘要，不包含视频、原图和下载缓存。",
+    ])
+    local_files = {
+        "output_folder": str(folder),
+        "contact_sheet": str(find_first_file(folder, ["*关键帧总览*.jpg", "*总览*.jpg", "*.jpg"]) or ""),
+        "raw_note_json": str(output_raw_path(folder, "note.json")),
+        "raw_comments_json": str(output_raw_path(folder, "comments.json")),
+    }
+    status = {
+        "status": "pending_gpt_analysis",
+        "created_at": created,
+        "updated_at": created,
+        "result_folder": "",
+    }
+
+    write_json(package_dir / "manifest.json", manifest)
+    (package_dir / "source.md").write_text(source, encoding="utf-8")
+    (package_dir / "transcript.md").write_text(markdown_list("口播转写", compact_transcript(folder)), encoding="utf-8")
+    (package_dir / "ocr.md").write_text(markdown_list("关键帧 OCR", compact_ocr(folder)), encoding="utf-8")
+    (package_dir / "comments_digest.md").write_text(markdown_list("高价值评论摘要", digest_comments(comments)), encoding="utf-8")
+    write_json(package_dir / "local_files.json", local_files)
+    write_json(package_dir / "status.json", status)
+    return {
+        "id": package_id,
+        "folder": str(package_dir),
+        "relativePath": f"analysis_inbox/{package_id}",
+        "createdAt": created,
+    }
+
+
+def git_status_porcelain():
+    proc = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise RuntimeError(stderr or stdout or "git status failed")
+    return stdout.splitlines()
+
+
+def status_path(line):
+    path = line[3:] if len(line) > 3 else ""
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.replace("\\", "/").strip().strip('"')
+
+
+def ensure_only_analysis_dirty():
+    blocked = []
+    for line in git_status_porcelain():
+        path = status_path(line)
+        if path and not (path.startswith("analysis_inbox/") or path.startswith("analysis_results/")):
+            blocked.append(line)
+    if blocked:
+        raise RuntimeError("存在非分析目录的本地改动，已停止自动上传：" + "；".join(blocked[:8]))
+
+
+def sync_analysis_package(package_id):
+    ensure_only_analysis_dirty()
+    rel = f"analysis_inbox/{package_id}"
+    subprocess.run(["git", "add", rel], cwd=str(ROOT), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", rel], cwd=str(ROOT))
+    if staged.returncode == 0:
+        return {"ok": True, "uploaded": False, "message": "没有新文件需要上传。"}
+    commit = subprocess.run(
+        ["git", "commit", "-m", f"Add analysis inbox {package_id}"],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if commit.returncode != 0:
+        raise RuntimeError((commit.stderr or commit.stdout).decode("utf-8", errors="replace"))
+    push = subprocess.run(["git", "push", "origin", "main"], cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if push.returncode != 0:
+        raise RuntimeError((push.stderr or push.stdout).decode("utf-8", errors="replace"))
+    return {"ok": True, "uploaded": True, "message": "已上传到 GitHub，回到 GPT 说：分析最新一条。"}
+
+
 def list_output_cases():
     cases = []
     if not OUTPUT_ROOT.exists():
@@ -109,7 +417,7 @@ def list_output_cases():
         note = rows_to_dict(read_json(folder / "raw" / "note.json", []))
         comments = read_json(folder / "raw" / "comments.json", [])
         case = build_case_from_output(folder.name, folder, note, comments)
-        cases.append(case)
+        cases.append(attach_gpt_state(case))
     return cases
 
 
@@ -429,7 +737,7 @@ def merge_cases(db_cases, output_cases):
         if not case_id:
             continue
         if case_id not in merged:
-            merged[case_id] = case
+            merged[case_id] = attach_gpt_state(case)
             continue
         for key in ["url", "source", "project", "manualNote"]:
             if case.get(key) not in ("", None, []):
@@ -437,7 +745,7 @@ def merge_cases(db_cases, output_cases):
         if case.get("status") == "失败":
             merged[case_id]["status"] = "失败"
             merged[case_id]["error"] = case.get("error", "")
-    return sorted(merged.values(), key=lambda x: x.get("createdAt", ""), reverse=True)
+    return sorted([attach_gpt_state(case) for case in merged.values()], key=lambda x: x.get("createdAt", ""), reverse=True)
 
 
 def create_brief(case, product=None, insight=None):
@@ -646,6 +954,25 @@ def run_analysis_task(task_id, url, note_id):
         task["status"] = "已完成"
         task["log"].append("拆解完成，已进入案例库")
         update_case_after_task(note_id, url)
+        task["log"].append("正在生成 GPT 轻量分析包")
+        package = create_analysis_package(note_id, url)
+        task["gpt"] = {
+            "status": "已生成分析包",
+            "packageId": package["id"],
+            "relativePath": package["relativePath"],
+            "createdAt": package["createdAt"],
+        }
+        write_task(task)
+        task["log"].append(f"已生成分析包：{package['relativePath']}")
+        try:
+            sync_result = sync_analysis_package(package["id"])
+            task["gpt"]["status"] = "已上传 GitHub，等待 GPT 分析" if sync_result.get("uploaded") else "已生成分析包"
+            task["gpt"]["message"] = sync_result.get("message", "")
+            task["log"].append(sync_result.get("message", "已处理 GitHub 同步。"))
+        except Exception as sync_exc:
+            task["gpt"]["status"] = "GitHub 上传失败"
+            task["gpt"]["error"] = str(sync_exc)
+            task["log"].append(f"GitHub 上传失败：{sync_exc}")
     except Exception as exc:
         task["status"] = "失败"
         task["error"] = str(exc)

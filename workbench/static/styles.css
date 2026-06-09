@@ -429,6 +429,41 @@ input:focus, textarea:focus, select:focus {
   display: none;
 }
 
+.gpt-status-card {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf8;
+  color: var(--text);
+}
+
+.gpt-status-card span {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.gpt-status-card small,
+.gpt-status-card em {
+  color: var(--muted);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdown-box {
+  margin-top: 12px;
+  padding: 12px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
 .keyword-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
