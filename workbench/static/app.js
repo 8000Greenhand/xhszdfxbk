@@ -55,6 +55,7 @@ function switchView(view) {
 }
 
 function renderAll() {
+  renderProductOptions();
   renderSampleTables();
   renderMissing();
   renderResults();
@@ -64,8 +65,10 @@ function renderAll() {
   if (window.lucide) lucide.createIcons();
 }
 
-function typeToView(type) {
-  return { "市场参考": "market", "达人合作": "kol", "官号发布": "official" }[type] || "market";
+function renderProductOptions() {
+  const el = $("#productOptions");
+  if (!el) return;
+  el.innerHTML = state.products.map((item) => `<option value="${esc(item.name)}"></option>`).join("");
 }
 
 function matches(item, query) {
@@ -230,7 +233,7 @@ function collectPayload() {
 function resetForm() {
   ["#urlInput", "#titleInput", "#noteInput", "#marketProduct", "#creatorInput", "#kolProduct", "#costInput", "#officialProduct", "#publishDate"].forEach((s) => { const el = $(s); if (el) el.value = ""; });
   $("#processMode").value = "只登记";
-  $("#contentForm").value = "自动识别";
+  $("#contentForm").value = "图文";
   $("#recordReason").value = "";
   $("#collabType").value = "";
   $("#tracking").value = "";
