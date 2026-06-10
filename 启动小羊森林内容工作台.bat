@@ -2,10 +2,12 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+set "WORKBENCH_URL=http://127.0.0.1:8765/?v=20260610-upload"
 
 echo ========================================
 echo 小羊森林内容工作台启动中...
 echo 当前目录：%cd%
+echo 打开地址：%WORKBENCH_URL%
 echo ========================================
 echo.
 
@@ -42,7 +44,7 @@ echo [3/4] 正在检查 8765 端口...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($existing) { exit 0 } else { exit 3 } }"
 if not errorlevel 3 (
   echo 端口 8765 已经有服务在运行，直接打开页面。
-  start "" "http://127.0.0.1:8765"
+  start "" "%WORKBENCH_URL%"
   echo.
   echo 已打开工作台。如果页面打不开，请把这个窗口截图发给 GPT。
   pause
@@ -51,10 +53,10 @@ if not errorlevel 3 (
 
 echo.
 echo [4/4] 正在启动工作台服务...
-echo 浏览器即将打开：http://127.0.0.1:8765
+echo 浏览器即将打开：%WORKBENCH_URL%
 echo 如果下面出现 Python 报错，请把整个窗口截图发给 GPT。
 echo.
-start "" "http://127.0.0.1:8765"
+start "" "%WORKBENCH_URL%"
 ".\.venv\Scripts\python.exe" ".\workbench\server.py"
 
 echo.
