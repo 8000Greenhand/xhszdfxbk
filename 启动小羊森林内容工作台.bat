@@ -2,7 +2,8 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-set "WORKBENCH_URL=http://127.0.0.1:8765/?v=20260610-card-title"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmmss"') do set "CACHE_BUST=%%i"
+set "WORKBENCH_URL=http://127.0.0.1:8765/?v=%CACHE_BUST%"
 
 echo ========================================
 echo 小羊森林内容工作台启动中...
