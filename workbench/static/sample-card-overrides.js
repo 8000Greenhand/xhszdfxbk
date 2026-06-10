@@ -46,19 +46,23 @@ function readableContentFormOverride(item, result = null) {
   return "";
 }
 
+function sampleHeadlinePartsOverride(item, result = null, analysisMeta = {}) {
+  const author = readableAuthorOverride(item, analysisMeta);
+  const contentForm = readableContentFormOverride(item, result);
+  const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || "");
+  return [author, contentForm, dateText].filter(Boolean);
+}
+
 function sampleCard(item) {
   const gpt = item.gpt || {};
   const result = gpt.result || null;
   const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
   const missing = item.missing || [];
   const title = readableSampleTitleOverride(item, analysisMeta);
-  const author = readableAuthorOverride(item, analysisMeta);
-  const contentForm = readableContentFormOverride(item, result);
-  const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || "");
   const metrics = cardMetrics(item, result, analysisMeta);
   const kind = missing.length ? "risk" : result ? "" : "warn";
   const reasonText = item.note || item.recordReason || "";
-  const headlineParts = [author, contentForm, dateText].filter(Boolean);
+  const headlineParts = sampleHeadlinePartsOverride(item, result, analysisMeta);
 
   return `
     <article class="sample-card">
@@ -88,6 +92,38 @@ function sampleCard(item) {
       </div>
     </article>
   `;
+}
+
+function renderMissing() {
+  const rows = state.samples.filter((item) => (item.missing || []).length);
+  $("#missingList").innerHTML = rows.map((item) => {
+    const gpt = item.gpt || {};
+    const result = gpt.result || null;
+    const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
+    const title = readableSampleTitleOverride(item, analysisMeta);
+    const headlineParts = sampleHeadlinePartsOverride(item, result, analysisMeta);
+    const kind = (item.missing || []).length ? "risk" : "";
+
+    return `
+      <article class="missing-card">
+        <div>
+          <h3>${headlineParts.map((x) => esc(x)).join(" ｜ ")}</h3>
+          <p class="muted note-title">${esc(title)}</p>
+          <p class="eyebrow">GPT 需要你补充</p>
+          <ul>${(item.missing || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          ${item.note ? `<p class="muted">备注：${esc(item.note)}</p>` : ""}
+          <div class="row wrap">
+            ${badge(item.sampleType || "样本")}
+            ${item.recordReason ? badge(item.recordReason, "info") : ""}
+          </div>
+        </div>
+        <div class="row wrap">
+          ${item.url ? `<a class="secondary" href="${esc(item.url)}" target="_blank">打开笔记</a>` : ""}
+          ${badge(item.status || gpt.status || "待补资料", kind)}
+        </div>
+      </article>
+    `;
+  }).join("") || `<div class="empty">暂无待补资料。资料越完整，GPT 判断越少瞎猜。</div>`;
 }
 
 function resultCard(result, item = null) {
