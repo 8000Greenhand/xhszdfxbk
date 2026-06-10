@@ -37,6 +37,26 @@ function md(text) {
   return esc(text || "").replace(/\n/g, "<br>");
 }
 
+function firstMatch(text, patterns) {
+  for (const pattern of patterns) {
+    const match = String(text || "").match(pattern);
+    if (match && match[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function parseAnalysisMeta(text) {
+  const source = String(text || "");
+  const dataLine = firstMatch(source, [/数据[:：]\s*([^\n]+)/]);
+  return {
+    title: firstMatch(source, [/笔记标题[:：]\s*([^\n]+)/, /标题[:：]\s*([^\n]+)/]),
+    author: firstMatch(source, [/作者[:：]\s*([^\n]+)/, /博主[:：]\s*([^\n]+)/]),
+    likes: firstMatch(dataLine, [/点赞\s*([\d,]+)/]) || firstMatch(source, [/点赞[:：]?\s*([\d,]+)/]),
+    collects: firstMatch(dataLine, [/收藏\s*([\d,]+)/]) || firstMatch(source, [/收藏[:：]?\s*([\d,]+)/]),
+    comments: firstMatch(dataLine, [/评论\s*([\d,]+)/]) || firstMatch(source, [/评论[:：]?\s*([\d,]+)/]),
+  };
+}
+
 async function load() {
   const data = await api("/api/bootstrap");
   state.samples = data.samples || [];
@@ -89,19 +109,38 @@ function renderTable(type, target, searchTarget) {
   $(target).innerHTML = rows.map(sampleCard).join("") || `<div class="empty">还没有${esc(type)}样本。</div>`;
 }
 
+function cardMetrics(item, result, analysisMeta) {
+  const metrics = item.metrics || {};
+  if (item.sampleType === "市场参考") {
+    return [
+      { label: "点赞", value: metrics.likes || item.likes || analysisMeta.likes || "-" },
+      { label: "收藏", value: metrics.collects || item.collects || analysisMeta.collects || "-" },
+      { label: "评论", value: metrics.comments || item.comments || analysisMeta.comments || "-" },
+    ];
+  }
+  return [
+    { label: "曝光/播放", value: metrics.impressions || item.impressions || "-" },
+    { label: "商品点击", value: metrics.itemClicks || item.itemClicks || "-" },
+    { label: "订单/GMV", value: metrics.orders || item.orders || "-" },
+  ];
+}
+
 function sampleCard(item) {
   const gpt = item.gpt || {};
   const result = gpt.result || null;
+  const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
   const missing = item.missing || [];
-  const metrics = item.metrics || {};
-  const title = item.title || item.url || item.id;
+  const title = item.title || analysisMeta.title || item.url || item.id;
+  const author = item.creator || analysisMeta.author || "账号未知";
+  const metrics = cardMetrics(item, result, analysisMeta);
   const kind = missing.length ? "risk" : result ? "" : "warn";
   return `
     <article class="sample-card">
       <div class="sample-main">
         <p class="eyebrow">${esc(item.sampleType)} · ${esc(item.contentForm || "未识别")} · ${esc(item.processMode || "未设置")}</p>
         <h3>${esc(title)}</h3>
-        <p class="muted">${esc(item.creator || "账号未知")} ${item.product ? `｜${esc(item.product)}` : ""} ${item.publishDate ? `｜${esc(item.publishDate)}` : ""}</p>
+        <p class="muted">${esc(author)} ${item.product ? `｜${esc(item.product)}` : ""} ${item.publishDate ? `｜${esc(item.publishDate)}` : ""}</p>
+        ${item.url && title !== item.url ? `<p class="link-line">${esc(item.url)}</p>` : ""}
         ${item.note ? `<p>${esc(item.note)}</p>` : ""}
         <div class="row wrap">
           ${badge(item.status || gpt.status || "只登记", kind)}
@@ -114,9 +153,7 @@ function sampleCard(item) {
       </div>
       <div class="sample-side">
         <div class="mini-metrics">
-          <div><strong>${esc(metrics.impressions || item.impressions || "-")}</strong><span>曝光/播放</span></div>
-          <div><strong>${esc(metrics.itemClicks || item.itemClicks || "-")}</strong><span>商品点击</span></div>
-          <div><strong>${esc(metrics.orders || item.orders || "-")}</strong><span>订单/GMV</span></div>
+          ${metrics.map((m) => `<div><strong>${esc(m.value)}</strong><span>${esc(m.label)}</span></div>`).join("")}
         </div>
         <div class="actions">
           ${item.url ? `<a href="${esc(item.url)}" target="_blank">打开链接</a>` : ""}
@@ -158,12 +195,14 @@ function resultSummary(result) {
 
 function resultCard(result, item = null) {
   const summary = resultSummary(result);
+  const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
   return `
     <article class="result-card" id="result-${esc(result.id)}">
       <div class="result-head">
         <div>
           <p class="eyebrow">${esc(item?.sampleType || "GPT 分析结果")} · ${esc(item?.contentForm || "")}</p>
-          <h3>${esc(item?.title || item?.url || result.id)}</h3>
+          <h3>${esc(item?.title || item?.url || analysisMeta.title || result.id)}</h3>
+          ${analysisMeta.author ? `<p class="muted">${esc(analysisMeta.author)}</p>` : ""}
         </div>
         ${badge(item?.gpt?.status || result.status?.status || "已完成分析")}
       </div>
