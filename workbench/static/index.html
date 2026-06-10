@@ -6,6 +6,8 @@
     <title>小红书内容样本与合作复盘工作台</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   </head>
   <body>
     <datalist id="productOptions"></datalist>
@@ -111,7 +113,7 @@
       <section class="view" id="view-products">
         <div class="grid two">
           <section class="panel">
-            <div class="panel-head"><h2>添加产品资料</h2><span>PPT/文档内容可先粘贴，第一版整理成轻量产品卡。</span></div>
+            <div class="panel-head"><h2>添加产品资料</h2><span>支持上传 PDF / Word / PPT / Excel / TXT，也可以手动粘贴。</span></div>
             <div class="form-grid">
               <label class="field"><span>产品名称</span><input id="productName" placeholder="四神饮 / 玉屏乌梅饮 / 其他" /></label>
               <label class="field"><span>产品分类</span><input id="productCategory" placeholder="如 儿童食养饮品" /></label>
@@ -119,7 +121,13 @@
               <label class="field"><span>口味</span><input id="productTaste" placeholder="如 酸酸甜甜" /></label>
             </div>
             <label class="field"><span>核心场景</span><input id="productScenes" placeholder="如 饭后、出门、日常加餐" /></label>
-            <label class="field"><span>卖点 / 配方 / 注意事项 / 禁止表达</span><textarea id="productRaw" rows="8" placeholder="直接粘贴产品手册、详情页、客服话术、PPT整理文字等"></textarea></label>
+            <label class="field upload-box">
+              <span>上传产品资料</span>
+              <input id="productFiles" type="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.json,.html,.htm" />
+              <small>选择文件后会自动提取文字并追加到下方资料框。PDF/Office 文件较大时需要等几秒。</small>
+            </label>
+            <div class="task-log" id="productFileLog">还未上传文件</div>
+            <label class="field"><span>粘贴 / 上传后提取的产品资料</span><textarea id="productRaw" rows="8" placeholder="可以直接粘贴产品手册、详情页、客服话术，也可以先上传文件自动提取文字"></textarea></label>
             <button class="primary" id="addProduct"><i data-lucide="package-plus"></i><span>生成产品卡</span></button>
           </section>
           <section class="panel"><div class="panel-head"><h2>产品卡</h2><span id="productCount">0 个</span></div><div id="productList" class="stack"></div></section>
