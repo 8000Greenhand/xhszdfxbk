@@ -269,10 +269,98 @@ function toggleTypeFields() {
   $$(".conditional").forEach((el) => el.classList.toggle("hidden", el.dataset.for !== type));
 }
 
+function readAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+function readAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function cleanXmlText(xml) {
+  return String(xml || "")
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function extractOfficeText(file, ext) {
+  if (!window.JSZip) throw new Error("JSZip 未加载，无法解析 Office 文件");
+  const zip = await JSZip.loadAsync(await readAsArrayBuffer(file));
+  let paths = [];
+  if (ext === "docx") paths = Object.keys(zip.files).filter((p) => p === "word/document.xml" || p.startsWith("word/header") || p.startsWith("word/footer"));
+  if (ext === "pptx") paths = Object.keys(zip.files).filter((p) => p.startsWith("ppt/slides/slide") && p.endsWith(".xml"));
+  if (ext === "xlsx") paths = Object.keys(zip.files).filter((p) => ["xl/sharedStrings.xml", "xl/workbook.xml"].includes(p) || (p.startsWith("xl/worksheets/sheet") && p.endsWith(".xml")));
+  const parts = [];
+  for (const path of paths) {
+    const xml = await zip.files[path].async("text");
+    const text = cleanXmlText(xml);
+    if (text) parts.push(`【${path}】\n${text}`);
+  }
+  return parts.join("\n\n") || "未能从 Office 文件中提取到文字。";
+}
+
+async function extractPdfText(file) {
+  if (!window.pdfjsLib) throw new Error("PDF.js 未加载，无法解析 PDF");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf = await pdfjsLib.getDocument({ data: await readAsArrayBuffer(file) }).promise;
+  const pages = [];
+  for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
+    const page = await pdf.getPage(pageNo);
+    const content = await page.getTextContent();
+    const text = content.items.map((item) => item.str).join(" ").replace(/\s+/g, " ").trim();
+    if (text) pages.push(`【PDF 第 ${pageNo} 页】\n${text}`);
+  }
+  return pages.join("\n\n") || "未能从 PDF 中提取到可复制文字，可能是扫描图片版。";
+}
+
+async function extractFileText(file) {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (["txt", "md", "csv", "json", "html", "htm"].includes(ext)) return await readAsText(file);
+  if (["docx", "pptx", "xlsx"].includes(ext)) return await extractOfficeText(file, ext);
+  if (ext === "pdf") return await extractPdfText(file);
+  return `暂不支持自动提取该文件类型：${file.name}`;
+}
+
+async function handleProductFiles(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  const log = $("#productFileLog");
+  const raw = $("#productRaw");
+  const outputs = [];
+  for (const file of files) {
+    try {
+      log.textContent = `正在读取：${file.name}`;
+      const text = await extractFileText(file);
+      outputs.push(`\n\n===== 上传文件：${file.name} =====\n${text}`);
+    } catch (err) {
+      outputs.push(`\n\n===== 上传文件：${file.name} =====\n提取失败：${err.message || err}`);
+    }
+  }
+  raw.value = `${raw.value || ""}${outputs.join("\n")}`.trim();
+  log.textContent = `已处理 ${files.length} 个文件，文字已追加到资料框。请检查后点“生成产品卡”。`;
+}
+
 function bindEvents() {
   $$(".nav-button").forEach((btn) => btn.addEventListener("click", () => switchView(btn.dataset.view)));
   ["#marketSearch", "#kolSearch", "#officialSearch"].forEach((s) => $(s)?.addEventListener("input", renderSampleTables));
   $("#sampleType").addEventListener("change", toggleTypeFields);
+  $("#productFiles")?.addEventListener("change", handleProductFiles);
   $("#submitSample").addEventListener("click", async () => {
     const payload = collectPayload();
     if (!payload.url && !payload.title) {
@@ -302,6 +390,10 @@ function bindEvents() {
     if (!payload.name && !payload.raw) return;
     await api("/api/product", { method: "POST", body: JSON.stringify(payload) });
     ["#productName", "#productCategory", "#productAge", "#productTaste", "#productScenes", "#productRaw"].forEach((s) => $(s).value = "");
+    const files = $("#productFiles");
+    if (files) files.value = "";
+    const log = $("#productFileLog");
+    if (log) log.textContent = "还未上传文件";
     await load();
   });
   $("#addVoice").addEventListener("click", async () => {
