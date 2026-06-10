@@ -46,16 +46,16 @@ function sampleCard(item) {
   const metrics = cardMetrics(item, result, analysisMeta);
   const kind = missing.length ? "risk" : result ? "" : "warn";
   const reasonText = item.note || item.recordReason || "";
-  const metaParts = [item.sampleType, item.contentForm || "未识别", dateText].filter(Boolean);
+  const headlineParts = [author, item.contentForm || "未识别", dateText].filter(Boolean);
 
   return `
     <article class="sample-card">
       <div class="sample-main">
-        <h3>${esc(author)}</h3>
-        <p class="eyebrow">${metaParts.map((x) => esc(x)).join(" ｜ ")}</p>
+        <h3>${headlineParts.map((x) => esc(x)).join(" ｜ ")}</h3>
         <p class="muted note-title">${esc(title)}</p>
         ${reasonText ? `<p>${esc(reasonText)}</p>` : ""}
         <div class="row wrap">
+          ${badge(item.sampleType || "样本")}
           ${badge(item.status || gpt.status || "只登记", kind)}
           ${item.recordReason ? badge(item.recordReason, "info") : ""}
           ${item.tracking ? badge(item.tracking, "info") : ""}
