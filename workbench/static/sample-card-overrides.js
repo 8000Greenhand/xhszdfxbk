@@ -8,6 +8,12 @@ function noteIdFromUrlOverride(url) {
   return match ? match[1] : "";
 }
 
+function dateOnlyOverride(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : "";
+}
+
 function readableSampleTitleOverride(item, analysisMeta = {}) {
   const manualTitle = String(item.title || "").trim();
   if (manualTitle && !isUrlLikeOverride(manualTitle)) return manualTitle;
@@ -19,23 +25,35 @@ function readableSampleTitleOverride(item, analysisMeta = {}) {
   return noteId ? `小红书笔记 ${noteId}` : (item.id || "未命名样本");
 }
 
+function readableAuthorOverride(item, analysisMeta = {}) {
+  const manualAuthor = String(item.creator || "").trim();
+  if (manualAuthor) return manualAuthor;
+
+  const analyzedAuthor = String(analysisMeta.author || "").trim();
+  if (analyzedAuthor) return analyzedAuthor;
+
+  return "账号未知";
+}
+
 function sampleCard(item) {
   const gpt = item.gpt || {};
   const result = gpt.result || null;
   const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
   const missing = item.missing || [];
   const title = readableSampleTitleOverride(item, analysisMeta);
-  const author = item.creator || analysisMeta.author || "账号未知";
+  const author = readableAuthorOverride(item, analysisMeta);
+  const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || "");
   const metrics = cardMetrics(item, result, analysisMeta);
   const kind = missing.length ? "risk" : result ? "" : "warn";
   const reasonText = item.note || item.recordReason || "";
+  const metaParts = [item.sampleType, item.contentForm || "未识别", dateText].filter(Boolean);
 
   return `
     <article class="sample-card">
       <div class="sample-main">
-        <p class="eyebrow">${esc(item.sampleType)} · ${esc(item.contentForm || "未识别")} · ${esc(item.processMode || "未设置")}</p>
-        <h3>${esc(title)}</h3>
-        <p class="muted">${esc(author)} ${item.product ? `｜${esc(item.product)}` : ""} ${item.publishDate ? `｜${esc(item.publishDate)}` : ""}</p>
+        <h3>${esc(author)}</h3>
+        <p class="eyebrow">${metaParts.map((x) => esc(x)).join(" ｜ ")}</p>
+        <p class="muted note-title">${esc(title)}</p>
         ${reasonText ? `<p>${esc(reasonText)}</p>` : ""}
         <div class="row wrap">
           ${badge(item.status || gpt.status || "只登记", kind)}
