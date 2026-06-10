@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-set "WORKBENCH_URL=http://127.0.0.1:8765/?v=20260610-upload"
+set "WORKBENCH_URL=http://127.0.0.1:8765/?v=20260610-card-title"
 
 echo ========================================
 echo 小羊森林内容工作台启动中...
