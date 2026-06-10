@@ -35,6 +35,17 @@ function readableAuthorOverride(item, analysisMeta = {}) {
   return "账号未知";
 }
 
+function readableContentFormOverride(item, result = null) {
+  const raw = String(item.contentForm || "").trim();
+  if (["图文", "视频"].includes(raw)) return raw;
+
+  const analysisText = String(result?.analysisText || "");
+  if (/视频里|视频中|口播|镜头|画面|字幕|剪辑/.test(analysisText)) return "视频";
+  if (/图文|封面|内页|第\s*1\s*页|第一页|多页|图片/.test(analysisText)) return "图文";
+
+  return "";
+}
+
 function sampleCard(item) {
   const gpt = item.gpt || {};
   const result = gpt.result || null;
@@ -42,11 +53,12 @@ function sampleCard(item) {
   const missing = item.missing || [];
   const title = readableSampleTitleOverride(item, analysisMeta);
   const author = readableAuthorOverride(item, analysisMeta);
+  const contentForm = readableContentFormOverride(item, result);
   const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || "");
   const metrics = cardMetrics(item, result, analysisMeta);
   const kind = missing.length ? "risk" : result ? "" : "warn";
   const reasonText = item.note || item.recordReason || "";
-  const headlineParts = [author, item.contentForm || "未识别", dateText].filter(Boolean);
+  const headlineParts = [author, contentForm, dateText].filter(Boolean);
 
   return `
     <article class="sample-card">
