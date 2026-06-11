@@ -47,11 +47,60 @@ function configureWorkbenchCopyOverride() {
   });
 }
 
+function ensureSystemCheckPanelOverride() {
+  const panel = document.querySelector("#view-add .muted-panel");
+  if (!panel) return null;
+  let box = document.querySelector("#systemCheckBox");
+  if (box) return box;
+  box = document.createElement("div");
+  box.id = "systemCheckBox";
+  box.className = "decision-list";
+  box.style.marginBottom = "16px";
+  box.innerHTML = `<div><strong>系统自检</strong><span>等待检查</span></div>`;
+  const decisionList = panel.querySelector(".decision-list");
+  if (decisionList) panel.insertBefore(box, decisionList);
+  else panel.appendChild(box);
+  return box;
+}
+
+function okText(value) {
+  return value ? "通过" : "待确认";
+}
+
+function keywordHitText(map) {
+  const rows = Object.entries(map || {});
+  if (!rows.length) return "还没有可检查的关键词";
+  const ok = rows.filter(([, value]) => value).map(([key]) => key);
+  const miss = rows.filter(([, value]) => !value).map(([key]) => key);
+  return `命中 ${ok.length}/${rows.length}${miss.length ? `；缺：${miss.join("、")}` : ""}`;
+}
+
+async function renderSystemCheckOverride() {
+  const box = ensureSystemCheckPanelOverride();
+  if (!box) return;
+  box.innerHTML = `<div><strong>系统自检</strong><span>正在检查新逻辑是否接通...</span></div>`;
+  try {
+    const data = await fetch("/api/system_check", { cache: "no-store" }).then((res) => res.json());
+    const latest = data.latestAnalysisInput || {};
+    box.innerHTML = `
+      <div><strong>系统自检</strong><span>${data.ok ? "基础链路通过" : "基础链路待确认"}</span></div>
+      <div><strong>启动入口</strong><span>${data.serverV2Active ? "已运行 server_v2" : "未确认 server_v2"}</span></div>
+      <div><strong>系统大脑</strong><span>${okText(data.promptFileExists && Object.values(data.promptKeywordHits || {}).every(Boolean))}｜${keywordHitText(data.promptKeywordHits)}</span></div>
+      <div><strong>处理方式</strong><span>${data.processModesOk ? "已接入新选项" : "处理方式不完整"}</span></div>
+      <div><strong>最新分析包</strong><span>${latest.exists ? `${latest.message}${latest.relativePath ? `｜${latest.relativePath}` : ""}` : latest.message || "还没有生成分析包"}</span></div>
+      ${latest.exists ? `<div><strong>关键词检查</strong><span>${latest.ok ? "通过" : "待确认"}｜${keywordHitText(latest.keywordHits)}</span></div>` : ""}
+    `;
+  } catch (err) {
+    box.innerHTML = `<div><strong>系统自检</strong><span>无法读取 /api/system_check，可能旧服务还在运行。请关闭旧黑窗口后重启。</span></div>`;
+  }
+}
+
 const originalResetFormOverride = typeof resetForm === "function" ? resetForm : null;
 resetForm = function resetFormOverride() {
   if (originalResetFormOverride) originalResetFormOverride();
   configureProcessModesOverride();
   configureWorkbenchCopyOverride();
+  renderSystemCheckOverride();
   const process = document.querySelector("#processMode");
   if (process) process.value = "先判断价值";
   const form = document.querySelector("#contentForm");
@@ -214,6 +263,7 @@ function resultCard(result, item = null) {
 
 configureProcessModesOverride();
 configureWorkbenchCopyOverride();
+renderSystemCheckOverride();
 const defaultProcessMode = document.querySelector("#processMode");
 if (defaultProcessMode && defaultProcessMode.value === "只登记") defaultProcessMode.value = "先判断价值";
 load();
