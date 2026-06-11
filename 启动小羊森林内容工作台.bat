@@ -6,7 +6,7 @@ for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmmss"
 set "WORKBENCH_URL=http://127.0.0.1:8765/?v=%CACHE_BUST%"
 
 echo ========================================
-echo 小羊森林内容工作台启动中...
+echo 小羊森林内容学习与创作转译工作台启动中...
 echo 当前目录：%cd%
 echo 打开地址：%WORKBENCH_URL%
 echo ========================================
@@ -45,6 +45,7 @@ echo [3/4] 正在检查 8765 端口...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($existing) { exit 0 } else { exit 3 } }"
 if not errorlevel 3 (
   echo 端口 8765 已经有服务在运行，直接打开页面。
+  echo 如果你刚刚更新了代码但页面逻辑没变，请先关闭旧黑窗口，再重新双击入口。
   start "" "%WORKBENCH_URL%"
   echo.
   echo 已打开工作台。如果页面打不开，请把这个窗口截图发给 GPT。
@@ -55,10 +56,11 @@ if not errorlevel 3 (
 echo.
 echo [4/4] 正在启动工作台服务...
 echo 浏览器即将打开：%WORKBENCH_URL%
+echo 当前启动入口：workbench\server_v2.py
 echo 如果下面出现 Python 报错，请把整个窗口截图发给 GPT。
 echo.
 start "" "%WORKBENCH_URL%"
-".\.venv\Scripts\python.exe" ".\workbench\server.py"
+".\.venv\Scripts\python.exe" ".\workbench\server_v2.py"
 
 echo.
 echo 工作台服务已退出或启动失败。请把这个窗口截图发给 GPT。
