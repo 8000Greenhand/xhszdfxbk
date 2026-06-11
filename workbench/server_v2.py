@@ -208,7 +208,9 @@ def analysis_mode_instruction(process_mode):
 def patched_build_analysis_input(package_id, note_id, url, sample_meta=None):
     sample_meta = sample_meta or {}
     raw = ORIGINAL_BUILD_ANALYSIS_INPUT(package_id, note_id, url, sample_meta)
-    prefix = raw.split("\n## 11. 给 GPT 的分析任务", 1)[0]
+    prefix = raw.split("\n## 12. 给 GPT 的分析任务", 1)[0]
+    if prefix == raw:
+        prefix = raw.split("\n## 11. 给 GPT 的分析任务", 1)[0]
     brain_path = base.ROOT / "workbench" / "prompts" / "content_learning_system_v1.md"
     system_brain = base.read_text(brain_path, "未读取到系统大脑文件。")
     process_mode = sample_meta.get("processMode", "先判断价值")

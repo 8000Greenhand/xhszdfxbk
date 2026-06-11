@@ -121,8 +121,13 @@ def safe_name(value):
 
 def int_value(value):
     text = str(value or "0").replace(",", "").strip()
-    match = re.search(r"\d+", text)
-    return int(match.group(0)) if match else 0
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return 0
+    number = float(match.group(0))
+    if "万" in text:
+        number *= 10000
+    return int(number)
 
 
 def rows_to_dict(rows):
@@ -226,6 +231,79 @@ def list_local_files(folder):
     return "\n".join(rows) if rows else "未提取到。"
 
 
+def summarize_raw_text(path, limit=1200):
+    text = read_text(path, "").strip()
+    if not text:
+        return "无"
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines)
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def fallback_diagnostic(folder, step, parsed_data):
+    stdout = summarize_raw_text(raw_path(folder, f"{step}.stdout.txt"))
+    stderr = summarize_raw_text(raw_path(folder, f"{step}.stderr.txt"))
+    if step == "note":
+        fields = rows_to_dict(parsed_data)
+        parsed_count = len([v for v in fields.values() if str(v or "").strip()])
+        success = bool(fields.get("title") or fields.get("author") or fields.get("content"))
+    elif step == "comments":
+        parsed_count = len(parsed_data) if isinstance(parsed_data, list) else 0
+        success = parsed_count > 0
+    else:
+        parsed_count = len(parsed_data) if isinstance(parsed_data, list) else (1 if parsed_data else 0)
+        success = parsed_count > 0
+    reason = "" if success else "未解析到有效数据。请检查 stdout/stderr：可能是 opencli 返回结构变化、登录态失效、验证码、权限、短链跳转或 xsec_token 问题。"
+    return {
+        "step": step,
+        "success": success,
+        "returncode": "未记录",
+        "parsed_count": parsed_count,
+        "failure_reason": reason,
+        "stdout_summary": stdout,
+        "stderr_summary": stderr,
+    }
+
+
+def load_fetch_diagnostics(folder, note_rows, comments_rows):
+    download_rows = read_json(raw_path(folder, "download.json"), [])
+    source = {"note": note_rows, "comments": comments_rows, "download": download_rows}
+    diagnostics = {}
+    for step in ["note", "comments", "download"]:
+        saved = read_json(raw_path(folder, f"{step}.diagnostic.json"), None)
+        diagnostics[step] = saved if isinstance(saved, dict) else fallback_diagnostic(folder, step, source.get(step))
+    return diagnostics
+
+
+def format_fetch_diagnostics(diagnostics):
+    blocks = []
+    labels = {"note": "基础信息 note", "comments": "评论 comments", "download": "下载 download"}
+    for step in ["note", "comments", "download"]:
+        item = diagnostics.get(step, {})
+        status = "成功" if item.get("success") else "失败"
+        blocks.append("\n".join([
+            f"### {labels[step]}",
+            "",
+            f"- 状态：{status}",
+            f"- 返回码：{item.get('returncode', '未记录')}",
+            f"- 解析数量：{item.get('parsed_count', 0)}",
+            f"- 失败原因：{item.get('failure_reason') or '无'}",
+            "",
+            "stdout 摘要：",
+            "",
+            "```text",
+            str(item.get("stdout_summary") or "无"),
+            "```",
+            "",
+            "stderr 摘要：",
+            "",
+            "```text",
+            str(item.get("stderr_summary") or "无"),
+            "```",
+        ]))
+    return "\n\n".join(blocks)
+
+
 def infer_content_form(folder):
     if list((folder / "assets").glob("*.mp4")):
         return "视频"
@@ -238,16 +316,23 @@ def build_analysis_input(package_id, note_id, url, sample_meta=None):
     folder = find_output_folder(note_id)
     if not folder:
         raise RuntimeError("未找到本地 outputs 输出文件夹。")
-    note = rows_to_dict(read_json(raw_path(folder, "note.json"), []))
+    note_rows = read_json(raw_path(folder, "note.json"), [])
     comments = read_json(raw_path(folder, "comments.json"), [])
+    note = rows_to_dict(note_rows)
+    diagnostics = load_fetch_diagnostics(folder, note_rows, comments)
+    note_failure = diagnostics.get("note", {}).get("failure_reason") or "未提取到"
+    comments_failure = diagnostics.get("comments", {}).get("failure_reason") or "未提取到。"
     sample_meta = sample_meta or {}
     metrics = {
         "likes": int_value(note.get("likes")),
         "collects": int_value(note.get("collects")),
         "comments": int_value(note.get("comments")) or len(comments if isinstance(comments, list) else []),
     }
-    tags = note.get("tags", "") or note.get("topics", "") or "未提取到。"
-    content = note.get("content", "") or note.get("desc", "") or read_text(raw_path(folder, "note.stdout.txt"), "").strip() or "未提取到。"
+    tags = note.get("tags", "") or note.get("topics", "") or note_failure
+    content = note.get("content", "") or note.get("desc", "") or note_failure
+    comments_text = digest_comments(comments, 50)
+    if comments_text == "未提取到。":
+        comments_text = comments_failure
     contact_sheet = find_first_file(folder, ["*关键帧总览*.jpg", "*总览*.jpg", "*.jpg"])
     local_files = list_local_files(folder)
     return f"""# GPT 分析输入包
@@ -257,8 +342,8 @@ def build_analysis_input(package_id, note_id, url, sample_meta=None):
 - 分析包 ID：{package_id}
 - 小红书笔记 ID：{note_id or folder.name}
 - 原始链接：{url}
-- 标题：{note.get('title', '') or sample_meta.get('title', '') or '未提取到'}
-- 作者：{note.get('author', '') or sample_meta.get('creator', '') or '未提取到'}
+- 标题：{note.get('title', '') or sample_meta.get('title', '') or note_failure}
+- 作者：{note.get('author', '') or sample_meta.get('creator', '') or note_failure}
 - 内容形式：{sample_meta.get('contentForm') or infer_content_form(folder)}
 - 样本类型：{sample_meta.get('sampleType', '未标注')}
 - 处理方式：{sample_meta.get('processMode', '未标注')}
@@ -271,7 +356,11 @@ def build_analysis_input(package_id, note_id, url, sample_meta=None):
 
 {sample_meta.get('note', '').strip() or '未填写。'}
 
-## 3. 合作 / 发布补充信息
+## 3. 抓取诊断
+
+{format_fetch_diagnostics(diagnostics)}
+
+## 4. 合作 / 发布补充信息
 
 - 达人名称：{sample_meta.get('creator', '') or '未填写'}
 - 合作产品 / 发布产品：{sample_meta.get('product', '') or '未填写'}
@@ -282,33 +371,33 @@ def build_analysis_input(package_id, note_id, url, sample_meta=None):
 - 是否挂车：{sample_meta.get('hasCart', '') or '未填写'}
 - 选题/合作目的：{sample_meta.get('objective', '') or '未填写'}
 
-## 4. 笔记正文
+## 5. 笔记正文
 
 {content}
 
-## 5. 标签 / 话题
+## 6. 标签 / 话题
 
 {tags}
 
-## 6. 评论区原话
+## 7. 评论区原话
 
-{digest_comments(comments, 50)}
+{comments_text}
 
-## 7. 画面 OCR 文字
+## 8. 画面 OCR 文字
 
 {compact_ocr(folder)}
 
-## 8. 口播转写
+## 9. 口播转写
 
 {compact_transcript(folder)}
 
-## 9. 关键帧 / 画面摘要
+## 10. 关键帧 / 画面摘要
 
 关键帧总览图本地路径：
 
 {str(contact_sheet) if contact_sheet else '未提取到。'}
 
-## 10. 本地素材文件说明
+## 11. 本地素材文件说明
 
 outputs/{folder.name}/ 下存在以下关键文件：
 
@@ -316,7 +405,7 @@ outputs/{folder.name}/ 下存在以下关键文件：
 
 说明：视频、图片、frames、outputs 原始素材只保存在本机，不上传 GitHub。GPT 请只读取 analysis_inbox 中的文字材料。
 
-## 11. 给 GPT 的分析任务
+## 12. 给 GPT 的分析任务
 
 请根据样本类型输出有业务价值的分析：
 

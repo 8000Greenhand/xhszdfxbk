@@ -7,7 +7,10 @@ block to the material package so we can see why note/comments failed.
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +23,8 @@ if str(TOOLS_DIR) not in sys.path:
 
 import xhs_analyzer as base  # noqa: E402
 
+
+ORIGINAL_RUN_OPENCLI = base.run_opencli
 
 TITLE_KEYS = {
     "title", "displaytitle", "display_title", "notetitle", "note_title",
@@ -41,8 +46,103 @@ ORIGINAL_GENERATE_REPORT = base.generate_report
 ORIGINAL_GENERATE_FINAL_REPORT = base.generate_final_report
 
 
+def summarize_text(text: str, limit: int = 1200) -> str:
+    cleaned = "\n".join(line.rstrip() for line in str(text or "").splitlines() if line.strip())
+    return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
+
+
 def normalize_key(key: object) -> str:
     return re.sub(r"[^a-z0-9_]+", "", str(key or "").strip().lower())
+
+
+def diagnostic_step(args: list[str]) -> str:
+    if len(args) >= 2 and args[0] == "xiaohongshu" and args[1] in {"note", "comments", "download"}:
+        return args[1]
+    return ""
+
+
+def diagnostic_url(args: list[str]) -> str:
+    for item in args:
+        text = str(item or "")
+        if "xiaohongshu.com" in text or "xhslink.com" in text:
+            return text
+    return ""
+
+
+def write_opencli_diagnostic(args: list[str], cwd: Path, stdout: str, stderr: str, code: int):
+    step = diagnostic_step(args)
+    url = diagnostic_url(args)
+    if not step or not url:
+        return
+    note_id = base.note_id_from_url(url)
+    raw_dir = base.OUTPUT_ROOT / note_id / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    parsed = parse_json_value(stdout)
+    parsed_rows = patched_parse_rows(stdout)
+    if step == "note":
+        fields = patched_fields_to_dict(parsed_rows)
+        parsed_count = len([v for v in fields.values() if clean_text(v)])
+        has_useful = bool(fields.get("title") or fields.get("author") or fields.get("content"))
+    elif step == "comments":
+        rows = normalize_comments(parsed_rows)
+        parsed_count = len(rows)
+        has_useful = parsed_count > 0
+    else:
+        parsed_count = len(parsed_rows) if isinstance(parsed_rows, list) else (1 if parsed_rows else 0)
+        has_useful = bool(parsed_count)
+    if code != 0:
+        reason = "opencli 命令返回非 0，详见 stderr/stdout 摘要。"
+    elif not has_useful:
+        reason = "opencli 返回成功，但没有解析到有效数据；可能是返回结构变化、登录态失效、验证码、权限或链接参数问题。"
+    else:
+        reason = ""
+    payload = {
+        "step": step,
+        "command": " ".join(str(x) for x in args),
+        "returncode": code,
+        "success": code == 0 and has_useful,
+        "parsed_type": type(parsed).__name__ if parsed is not None else "",
+        "parsed_count": parsed_count,
+        "failure_reason": reason,
+        "stdout_summary": summarize_text(stdout),
+        "stderr_summary": summarize_text(stderr),
+    }
+    (raw_dir / f"{step}.diagnostic.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def quote_cmd_arg(value: object) -> str:
+    text = str(value)
+    if not text:
+        return '""'
+    if re.search(r'[\s&=?:]', text):
+        return '"' + text.replace('"', r'\"') + '"'
+    return text
+
+
+def patched_run_opencli(args: list[str], cwd: Path) -> tuple[str, str, int]:
+    appdata = Path(os.environ.get("APPDATA", ""))
+    opencli_main = appdata / "npm" / "node_modules" / "@jackwener" / "opencli" / "dist" / "src" / "main.js"
+    node = shutil.which("node")
+    if node and opencli_main.exists():
+        command_args = [node, str(opencli_main), *args]
+    else:
+        opencli = shutil.which("opencli.cmd") or shutil.which("opencli") or "opencli"
+        command = " ".join(quote_cmd_arg(x) for x in [opencli, *args])
+        command_args = ["cmd", "/d", "/s", "/c", f"chcp 65001 >nul && {command}"]
+    proc = subprocess.run(
+        command_args,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    code = proc.returncode
+    write_opencli_diagnostic(args, cwd, stdout, stderr, code)
+    return stdout, stderr, code
 
 
 def clean_text(value: object) -> str:
@@ -50,6 +150,17 @@ def clean_text(value: object) -> str:
     if text in {"None", "null", "undefined"}:
         return ""
     return text
+
+
+def normalize_metric_text(value: object) -> str:
+    text = clean_text(value).replace(",", "")
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return text
+    number = float(match.group(0))
+    if "万" in text:
+        number *= 10000
+    return str(int(number))
 
 
 def parse_json_value(text: str):
@@ -169,6 +280,9 @@ def normalize_note_dict(value: dict) -> dict:
     for old, new in alias_map.items():
         if not result.get(new) and result.get(old):
             result[new] = result.get(old)
+    for key in ["likes", "collects", "comments"]:
+        if result.get(key) not in ("", None):
+            result[key] = normalize_metric_text(result.get(key))
     return result
 
 
@@ -306,6 +420,7 @@ def patched_generate_report(*args, **kwargs):
 
 
 # Patch base module functions used by base.main().
+base.run_opencli = patched_run_opencli
 base.parse_rows = patched_parse_rows
 base.fields_to_dict = patched_fields_to_dict
 base.comment_insights = patched_comment_insights
