@@ -42,15 +42,13 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo.
 echo [3/4] 正在检查 8765 端口...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($existing) { exit 0 } else { exit 3 } }"
-if not errorlevel 3 (
-  echo 端口 8765 已经有服务在运行，直接打开页面。
-  echo 如果你刚刚更新了代码但页面逻辑没变，请先关闭旧黑窗口，再重新双击入口。
-  start "" "%WORKBENCH_URL%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $root=(Resolve-Path '.').Path.Replace('\\','\\'); $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if (-not $existing) { exit 3 }; $closed=$false; foreach ($conn in $existing) { $pid=$conn.OwningProcess; $proc=Get-CimInstance Win32_Process -Filter \"ProcessId=$pid\" -ErrorAction SilentlyContinue; $cmd=($proc.CommandLine | Out-String); if ($cmd -match 'workbench\\server(_v2)?\.py') { Write-Host \"检测到旧工作台服务，正在关闭 PID $pid\"; Stop-Process -Id $pid -Force; $closed=$true } }; if ($closed) { Start-Sleep -Seconds 1; exit 3 } else { exit 4 } }"
+if errorlevel 4 (
+  echo 端口 8765 已被其他程序占用，无法安全关闭。
+  echo 请关闭占用 8765 的程序，或把这个窗口截图发给 GPT。
   echo.
-  echo 已打开工作台。如果页面打不开，请把这个窗口截图发给 GPT。
   pause
-  exit /b 0
+  exit /b 1
 )
 
 echo.
