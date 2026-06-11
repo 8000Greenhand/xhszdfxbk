@@ -248,6 +248,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--green); box-shad
 .missing-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--red); font-weight: 800; }
 
 .result-card { padding: 16px; }
+.finalize-button { margin-top: 12px; width: fit-content; }
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; font-size: 13px; }
 details { margin-top: 10px; }
 summary { cursor: pointer; font-weight: 800; color: var(--green); }

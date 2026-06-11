@@ -526,6 +526,21 @@ def derive_missing(sample):
 
 
 def attach_states(sample, inbox, results):
+    final_result = sample.get("finalResult")
+    if isinstance(final_result, dict) and final_result.get("analysisText"):
+        sample["missing"] = derive_missing(sample)
+        sample["gpt"] = {
+            "inbox": None,
+            "result": {
+                "id": final_result.get("id") or sample.get("analysisPackageId") or sample.get("id"),
+                "relativePath": "本地最终版",
+                "analysisText": final_result.get("analysisText", ""),
+                "status": final_result.get("status", {}),
+                "finalized": True,
+            },
+            "status": "已确认最终版",
+        }
+        return sample
     sid = sample.get("id", "")
     note_id = sample.get("noteId", "")
     item = inbox.get(sample.get("analysisPackageId", "")) or inbox.get(note_id) or inbox.get(sid)
@@ -537,6 +552,57 @@ def attach_states(sample, inbox, results):
     sample["missing"] = derive_missing(sample)
     sample["gpt"] = {"inbox": item, "result": result, "status": "已完成分析" if result else (item.get("status") if item else sample.get("status", "只登记"))}
     return sample
+
+
+def remove_analysis_transfer_files(package_id):
+    removed = []
+    for root in [ANALYSIS_INBOX_ROOT, ANALYSIS_RESULTS_ROOT]:
+        target = root / package_id
+        if target.exists():
+            removed.append(str(target.relative_to(ROOT)).replace("\\", "/"))
+    if not removed:
+        return False, "GitHub 中转文件已经清理过。"
+    subprocess.run(["git", "rm", "-r", "--ignore-unmatch", *removed], cwd=ROOT, check=True, capture_output=True, text=True)
+    commit_check = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT)
+    if commit_check.returncode == 0:
+        return False, "没有需要提交的中转文件。"
+    subprocess.run(["git", "commit", "-m", f"Finalize analysis package {package_id}"], cwd=ROOT, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True, capture_output=True, text=True)
+    return True, "已删除 GitHub 中转文件。"
+
+
+def finalize_analysis(payload):
+    sample_id = payload.get("sampleId", "")
+    package_id = payload.get("packageId", "")
+    db = load_db()
+    sample = next((x for x in db.get("samples", []) if x.get("id") == sample_id), None)
+    if not sample and package_id:
+        sample = next((x for x in db.get("samples", []) if x.get("analysisPackageId") == package_id), None)
+    if not sample:
+        return {"ok": False, "error": "没有找到对应样本。"}
+    package_id = package_id or sample.get("analysisPackageId", "")
+    if not package_id:
+        return {"ok": False, "error": "这个样本还没有分析包。"}
+    results = get_results()
+    result = results.get(package_id)
+    if not result:
+        return {"ok": False, "error": "还没有找到 GPT 写回结果，不能确认最终版。"}
+    sample["finalResult"] = {
+        "id": package_id,
+        "analysisText": result.get("analysisText", ""),
+        "status": result.get("status", {}),
+        "finalizedAt": now_text(),
+    }
+    sample["status"] = "已确认最终版"
+    sample["finalizedAt"] = now_text()
+    sample["updatedAt"] = now_text()
+    save_db(db)
+    try:
+        removed, message = remove_analysis_transfer_files(package_id)
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or str(exc)).strip()
+        return {"ok": False, "error": f"最终版已保存在本地，但 GitHub 清理失败：{message}"}
+    return {"ok": True, "removed": removed, "message": message, "sample": sample}
 
 
 def run_analysis_task(task_id, sample_id, url, sample_meta):
@@ -729,6 +795,10 @@ class Handler(SimpleHTTPRequestHandler):
                     break
             save_db(db)
             self.send_json({"ok": True})
+            return
+        if parsed.path == "/api/analysis/finalize":
+            result = finalize_analysis(payload)
+            self.send_json(result, 200 if result.get("ok") else 400)
             return
         self.send_json({"error": "Not found"}, 404)
 

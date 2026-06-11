@@ -212,6 +212,8 @@ function resultCard(result, item = null) {
         <div class="markdown-box">${md(result.analysisText || "暂无分析正文。")}</div>
       </details>
       <p class="muted">结果路径：${esc(result.relativePath)}</p>
+      ${item && !result.finalized ? `<button class="primary finalize-button" data-finalize-sample="${esc(item.id)}" data-finalize-package="${esc(result.id)}">确认最终版并清理 GitHub 中转文件</button>` : ""}
+      ${result.finalized ? `<p class="muted">已确认最终版，当前结果保存在本地。</p>` : ""}
     </article>
   `;
 }
@@ -443,6 +445,26 @@ function bindEvents() {
     await load();
   });
   document.addEventListener("click", (event) => {
+    const finalizeBtn = event.target.closest("[data-finalize-sample]");
+    if (finalizeBtn) {
+      const ok = window.confirm("确认这版就是最终版？确认后会把结果保存在本地，并删除 GitHub 上这个链接的中转分析包。");
+      if (!ok) return;
+      api("/api/analysis/finalize", {
+        method: "POST",
+        body: JSON.stringify({
+          sampleId: finalizeBtn.dataset.finalizeSample,
+          packageId: finalizeBtn.dataset.finalizePackage,
+        }),
+      }).then(async (result) => {
+        if (!result.ok) {
+          alert(result.error || "确认失败");
+          return;
+        }
+        alert(result.message || "已确认最终版");
+        await load();
+      }).catch((error) => alert(error.message || "确认失败"));
+      return;
+    }
     const btn = event.target.closest("[data-result]");
     if (!btn) return;
     switchView("results");
