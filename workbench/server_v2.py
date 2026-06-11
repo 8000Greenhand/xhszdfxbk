@@ -35,6 +35,7 @@ ANALYSIS_TRIGGER_MODES = {
 }
 
 ORIGINAL_BUILD_ANALYSIS_INPUT = base.build_analysis_input
+ORIGINAL_END_HEADERS = base.Handler.end_headers
 
 
 base.DEFAULT_DB["settings"]["name"] = "小羊森林内容样本学习与创作转译系统"
@@ -57,6 +58,16 @@ base.SAMPLE_TYPE_META.update({
         "analysisFocus": ["自有内容实验", "封面标题", "第一页承接", "商品点击", "订单/GMV", "评论反馈", "下一步优化"],
     },
 })
+
+
+def no_cache_end_headers(self):
+    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+    self.send_header("Pragma", "no-cache")
+    self.send_header("Expires", "0")
+    ORIGINAL_END_HEADERS(self)
+
+
+base.Handler.end_headers = no_cache_end_headers
 
 
 def product_context_text(limit=12):
