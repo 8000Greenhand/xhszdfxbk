@@ -1,3 +1,33 @@
+const CONTENT_LEARNING_PROCESS_MODES = [
+  "只登记",
+  "先判断价值",
+  "只拆结构",
+  "分析产品承接",
+  "生成创作大纲",
+  "生成官号图文",
+  "生成博主文字脚本",
+  "完整分析",
+  "等数据后分析",
+];
+
+function configureProcessModesOverride() {
+  const select = document.querySelector("#processMode");
+  if (!select) return;
+  const current = select.value || "先判断价值";
+  select.innerHTML = CONTENT_LEARNING_PROCESS_MODES.map((mode) => `<option>${esc(mode)}</option>`).join("");
+  select.value = CONTENT_LEARNING_PROCESS_MODES.includes(current) ? current : "先判断价值";
+}
+
+const originalResetFormOverride = typeof resetForm === "function" ? resetForm : null;
+resetForm = function resetFormOverride() {
+  if (originalResetFormOverride) originalResetFormOverride();
+  configureProcessModesOverride();
+  const process = document.querySelector("#processMode");
+  if (process) process.value = "先判断价值";
+  const form = document.querySelector("#contentForm");
+  if (form && !form.value) form.value = "图文";
+};
+
 function isUrlLikeOverride(value) {
   const text = String(value || "").trim();
   return /^https?:\/\//i.test(text) || text.includes("xiaohongshu.com/explore/");
@@ -72,6 +102,7 @@ function sampleCard(item) {
         ${reasonText ? `<p>${esc(reasonText)}</p>` : ""}
         <div class="row wrap">
           ${badge(item.sampleType || "样本")}
+          ${badge(item.processMode || "未标注", "info")}
           ${badge(item.status || gpt.status || "只登记", kind)}
           ${item.recordReason ? badge(item.recordReason, "info") : ""}
           ${item.tracking ? badge(item.tracking, "info") : ""}
@@ -114,6 +145,7 @@ function renderMissing() {
           ${item.note ? `<p class="muted">备注：${esc(item.note)}</p>` : ""}
           <div class="row wrap">
             ${badge(item.sampleType || "样本")}
+            ${badge(item.processMode || "未标注", "info")}
             ${item.recordReason ? badge(item.recordReason, "info") : ""}
           </div>
         </div>
@@ -150,4 +182,7 @@ function resultCard(result, item = null) {
   `;
 }
 
+configureProcessModesOverride();
+const defaultProcessMode = document.querySelector("#processMode");
+if (defaultProcessMode && defaultProcessMode.value === "只登记") defaultProcessMode.value = "先判断价值";
 load();
