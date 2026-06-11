@@ -6,6 +6,7 @@ server while moving the workflow from a simple analysis package to a sample
 screening + product-fit + creative-translation system.
 """
 
+import re
 import threading
 import uuid
 
@@ -60,6 +61,15 @@ base.SAMPLE_TYPE_META.update({
 })
 
 
+PRODUCT_CARD_KEYWORDS = {
+    "painPoints": ["积食", "脾胃", "胃口", "食欲", "鼻炎", "喷嚏", "清水鼻涕", "鼻塞", "上火", "口干", "睡不踏实", "一头汗", "冷饮", "肚肚", "便便"],
+    "fitContent": ["清单", "科普", "食谱", "加餐", "早餐", "换季", "发作期", "发作后", "场景", "误区", "对比", "判断标准"],
+    "banned": ["治疗", "根治", "治愈", "药", "药效", "立刻", "马上", "保证", "替代", "鼻窦炎", "发烧", "黄浓鼻涕"],
+    "officialWriting": ["原理", "食材", "配方", "适用", "禁忌", "注意", "吃法", "详情页", "科普"],
+    "bloggerScript": ["孩子", "妈妈", "日常", "出门", "上学", "幼儿园", "真实", "口感", "方便", "开袋"],
+}
+
+
 def no_cache_end_headers(self):
     self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
     self.send_header("Pragma", "no-cache")
@@ -68,6 +78,62 @@ def no_cache_end_headers(self):
 
 
 base.Handler.end_headers = no_cache_end_headers
+
+
+def keyword_hits(text, words):
+    return [word for word in words if word and word in text]
+
+
+def compact_lines(text, limit=5):
+    lines = [re.sub(r"\s+", " ", line).strip(" -：:;") for line in str(text or "").splitlines()]
+    lines = [line for line in lines if len(line) >= 4]
+    return "；".join(lines[:limit])
+
+
+def patched_make_product_card(payload):
+    raw = payload.get("raw", "") or ""
+    name = payload.get("name", "").strip() or "未命名产品"
+    text = f"{name}\n{raw}"
+
+    pain_points = keyword_hits(text, PRODUCT_CARD_KEYWORDS["painPoints"])
+    fit_content = keyword_hits(text, PRODUCT_CARD_KEYWORDS["fitContent"])
+    banned_hits = keyword_hits(text, PRODUCT_CARD_KEYWORDS["banned"])
+    official_hits = keyword_hits(text, PRODUCT_CARD_KEYWORDS["officialWriting"])
+    blogger_hits = keyword_hits(text, PRODUCT_CARD_KEYWORDS["bloggerScript"])
+
+    card = {
+        "id": uuid.uuid4().hex[:10],
+        "name": name,
+        "category": payload.get("category", ""),
+        "forms": keyword_hits(text, base.PRODUCT_TAGS["forms"]),
+        "needs": keyword_hits(text, base.PRODUCT_TAGS["needs"]),
+        "timing": keyword_hits(text, base.PRODUCT_TAGS["timing"]),
+        "contentTags": keyword_hits(text, base.PRODUCT_TAGS["content"]),
+        "positioning": payload.get("positioning", "") or compact_lines(raw, 2),
+        "targetUser": payload.get("targetUser", ""),
+        "scenes": payload.get("scenes", ""),
+        "painPoints": payload.get("painPoints", "") or "、".join(pain_points),
+        "sellingPoints": payload.get("sellingPoints", ""),
+        "ingredients": payload.get("ingredients", ""),
+        "taste": payload.get("taste", ""),
+        "age": payload.get("age", ""),
+        "usage": payload.get("usage", ""),
+        "commonConcerns": payload.get("commonConcerns", ""),
+        "fitContent": payload.get("fitContent", "") or "、".join(fit_content),
+        "avoidContent": payload.get("avoidContent", ""),
+        "compliance": payload.get("compliance", ""),
+        "banned": payload.get("banned", "") or "、".join(banned_hits),
+        "difference": payload.get("difference", ""),
+        "officialWriting": payload.get("officialWriting", "") or "、".join(official_hits),
+        "bloggerScript": payload.get("bloggerScript", "") or "、".join(blogger_hits),
+        "faq": payload.get("faq", ""),
+        "raw": raw,
+        "createdAt": base.now_text(),
+    }
+    return card
+
+
+base.make_product_card = patched_make_product_card
 
 
 def product_context_text(limit=12):
@@ -83,13 +149,19 @@ def product_context_text(limit=12):
             raw_short = raw[:1000] + ("……" if len(raw) > 1000 else "")
             product_lines.append("\n".join([
                 f"### 产品 {idx}：{item.get('name', '未命名产品')}",
+                f"- 定位：{item.get('positioning', '') or '未填写'}",
                 f"- 分类：{item.get('category', '') or '未填写'}",
                 f"- 适用年龄：{item.get('age', '') or '未填写'}",
                 f"- 核心场景：{item.get('scenes', '') or '未填写'}",
-                f"- 口味：{item.get('taste', '') or '未填写'}",
-                f"- 已识别需求标签：{', '.join(item.get('needs', []) or []) or '未识别'}",
-                f"- 已识别内容标签：{', '.join(item.get('contentTags', []) or []) or '未识别'}",
-                f"- 合规/禁区：{item.get('compliance', '') or item.get('banned', '') or '未填写'}",
+                f"- 用户痛点：{item.get('painPoints', '') or '未填写'}",
+                f"- 主卖点：{item.get('sellingPoints', '') or '未填写'}",
+                f"- 口味/便利性：{item.get('taste', '') or '未填写'}｜{item.get('usage', '') or '未填写'}",
+                f"- 常见顾虑：{item.get('commonConcerns', '') or item.get('faq', '') or '未填写'}",
+                f"- 可承接内容：{item.get('fitContent', '') or ', '.join(item.get('contentTags', []) or []) or '未填写'}",
+                f"- 不适合硬蹭：{item.get('avoidContent', '') or '未填写'}",
+                f"- 禁用/合规表达：{item.get('banned', '') or item.get('compliance', '') or '未填写'}",
+                f"- 官号图文讲法：{item.get('officialWriting', '') or '未填写'}",
+                f"- 博主文字脚本讲法：{item.get('bloggerScript', '') or '未填写'}",
                 f"- 原始资料摘要：{raw_short or '未填写'}",
             ]))
         products_text = "\n\n".join(product_lines)
