@@ -9,6 +9,7 @@ screening + product-fit + creative-translation system.
 import re
 import threading
 import uuid
+from urllib.parse import urlparse
 
 import server as base
 
@@ -35,8 +36,18 @@ ANALYSIS_TRIGGER_MODES = {
     "完整分析",
 }
 
+SYSTEM_CHECK_KEYWORDS = [
+    "样本初筛",
+    "样本池分类",
+    "产品承接",
+    "创作出口",
+    "不要默认这条样本有价值",
+    "博主文字脚本",
+]
+
 ORIGINAL_BUILD_ANALYSIS_INPUT = base.build_analysis_input
 ORIGINAL_END_HEADERS = base.Handler.end_headers
+ORIGINAL_DO_GET = base.Handler.do_GET
 
 
 base.DEFAULT_DB["settings"]["name"] = "小羊森林内容样本学习与创作转译系统"
@@ -235,6 +246,66 @@ def patched_build_analysis_input(package_id, note_id, url, sample_meta=None):
 """
 
 
+def latest_analysis_input_status():
+    root = base.ANALYSIS_INBOX_ROOT
+    if not root.exists():
+        return {
+            "exists": False,
+            "ok": False,
+            "message": "analysis_inbox 文件夹还不存在。生成一次分析包后会自动出现。",
+            "requiredKeywords": SYSTEM_CHECK_KEYWORDS,
+            "keywordHits": {},
+        }
+    folders = sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+    for folder in folders:
+        path = folder / "analysis_input.md"
+        if not path.exists():
+            continue
+        text = base.read_text(path, "")
+        hits = {keyword: (keyword in text) for keyword in SYSTEM_CHECK_KEYWORDS}
+        return {
+            "exists": True,
+            "folder": folder.name,
+            "relativePath": str(path.relative_to(base.ROOT)).replace("\\", "/"),
+            "ok": all(hits.values()),
+            "requiredKeywords": SYSTEM_CHECK_KEYWORDS,
+            "keywordHits": hits,
+            "message": "最新分析包已接入新逻辑。" if all(hits.values()) else "最新分析包存在，但关键词不完整，可能是旧分析包或生成时仍在跑旧服务。",
+        }
+    return {
+        "exists": False,
+        "ok": False,
+        "message": "analysis_inbox 里还没有 analysis_input.md。保存一条需要分析的样本后再看。",
+        "requiredKeywords": SYSTEM_CHECK_KEYWORDS,
+        "keywordHits": {},
+    }
+
+
+def system_check_payload():
+    brain_path = base.ROOT / "workbench" / "prompts" / "content_learning_system_v1.md"
+    brain_text = base.read_text(brain_path, "")
+    brain_hits = {keyword: (keyword in brain_text) for keyword in ["样本初筛", "样本池分类", "产品承接", "博主文字脚本"]}
+    latest_input = latest_analysis_input_status()
+    checks = {
+        "serverV2Active": True,
+        "promptFileExists": brain_path.exists(),
+        "promptKeywordHits": brain_hits,
+        "processModes": ANALYSIS_PROCESS_MODES,
+        "processModesOk": all(mode in ANALYSIS_PROCESS_MODES for mode in ["先判断价值", "只拆结构", "分析产品承接", "生成创作大纲", "生成博主文字脚本"]),
+        "latestAnalysisInput": latest_input,
+    }
+    checks["ok"] = bool(checks["serverV2Active"] and checks["promptFileExists"] and all(brain_hits.values()) and checks["processModesOk"])
+    return checks
+
+
+def patched_do_get(self):
+    parsed = urlparse(self.path)
+    if parsed.path == "/api/system_check":
+        self.send_json(system_check_payload())
+        return
+    ORIGINAL_DO_GET(self)
+
+
 def patched_create_sample(payload):
     db = base.load_db()
     url = payload.get("url", "").strip()
@@ -285,6 +356,7 @@ def patched_create_sample(payload):
 
 base.build_analysis_input = patched_build_analysis_input
 base.create_sample = patched_create_sample
+base.Handler.do_GET = patched_do_get
 
 
 if __name__ == "__main__":
