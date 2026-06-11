@@ -1,15 +1,38 @@
-"""Launcher v3: content-learning workbench + robust Xiaohongshu metadata parser.
+"""Launcher v3: content-learning workbench + robust Xiaohongshu capture.
 
 server_v2 already patches the workbench workflow. This file keeps all of that and
-only swaps the local analyzer from tools/xhs_analyzer.py to tools/xhs_analyzer_v2.py,
-which can parse nested/object JSON metadata for title/author/engagement fields.
+only swaps the local analyzer to tools/xhs_analyzer_v3.py, which preserves signed
+Xiaohongshu URLs and retries slow comments capture.
 """
 
 import subprocess
 import sys
+from urllib.parse import urlparse
 
 import server_v2  # noqa: F401  # importing applies all v2 patches
 import server as base
+
+
+ORIGINAL_V2_SYSTEM_CHECK = server_v2.system_check_payload
+ORIGINAL_V2_DO_GET = base.Handler.do_GET
+
+
+def patched_system_check_payload_v3():
+    payload = ORIGINAL_V2_SYSTEM_CHECK()
+    payload["serverV2Active"] = False
+    payload["serverV3Active"] = True
+    payload["serverVersion"] = "server_v3"
+    payload["analyzer"] = "tools/xhs_analyzer_v3.py"
+    payload["ok"] = bool(payload.get("promptFileExists") and payload.get("processModesOk") and payload.get("serverV3Active"))
+    return payload
+
+
+def patched_do_get_v3(self):
+    parsed = urlparse(self.path)
+    if parsed.path == "/api/system_check":
+        self.send_json(patched_system_check_payload_v3())
+        return
+    ORIGINAL_V2_DO_GET(self)
 
 
 def patched_run_analysis_task_v3(task_id, sample_id, url, sample_meta):
@@ -18,7 +41,7 @@ def patched_run_analysis_task_v3(task_id, sample_id, url, sample_meta):
     sample = next((x for x in db.get("samples", []) if x.get("id") == sample_id), None)
     try:
         base.write_json(task_path, {"id": task_id, "status": "正在抓取小红书内容", "updatedAt": base.now_text()})
-        analyzer = base.ROOT / "tools" / "xhs_analyzer_v2.py"
+        analyzer = base.ROOT / "tools" / "xhs_analyzer_v3.py"
         subprocess.run([sys.executable, str(analyzer), "--url", url], cwd=base.ROOT, check=True)
         note_id = base.note_id_from_url(url)
         base.write_json(task_path, {"id": task_id, "status": "正在生成 GPT 分析包", "updatedAt": base.now_text()})
@@ -45,6 +68,7 @@ def patched_run_analysis_task_v3(task_id, sample_id, url, sample_meta):
         base.write_json(task_path, {"id": task_id, "status": "失败", "error": str(exc), "updatedAt": base.now_text()})
 
 
+base.Handler.do_GET = patched_do_get_v3
 base.run_analysis_task = patched_run_analysis_task_v3
 
 
