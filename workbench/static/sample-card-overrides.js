@@ -18,10 +18,40 @@ function configureProcessModesOverride() {
   select.value = CONTENT_LEARNING_PROCESS_MODES.includes(current) ? current : "先判断价值";
 }
 
+function configureWorkbenchCopyOverride() {
+  document.title = "小羊森林内容样本学习与创作转译系统";
+  const brandSub = document.querySelector(".brand span");
+  if (brandSub) brandSub.textContent = "内容学习与创作转译";
+  const eyebrow = document.querySelector(".topbar .eyebrow");
+  if (eyebrow) eyebrow.textContent = "小红书 / 样本学习 / 产品承接 / 创作转译";
+  const status = document.querySelector(".status-pill span");
+  if (status) status.textContent = "登记 → 初筛 → 产品承接 → 创作转译";
+  const addPanelTitle = document.querySelector("#view-add .panel-head h2");
+  if (addPanelTitle) addPanelTitle.textContent = "添加一条内容样本";
+  const addPanelDesc = document.querySelector("#view-add .panel-head span");
+  if (addPanelDesc) addPanelDesc.textContent = "先判断样本价值，再决定是否深拆或转译。";
+  const principleTitle = document.querySelector("#view-add .muted-panel .panel-head h2");
+  if (principleTitle) principleTitle.textContent = "系统判断原则";
+  const principleDesc = document.querySelector("#view-add .muted-panel .panel-head span");
+  if (principleDesc) principleDesc.textContent = "不是每条样本都值得复刻";
+  const decisionItems = document.querySelectorAll("#view-add .decision-list div");
+  const copy = [
+    ["先判断价值", "样本进入后先判断保留、暂存还是丢弃，不默认每条都值得学。"],
+    ["分样本池", "高价值复刻、结构参考、评论洞察、产品承接、反面避坑、暂存观察、低价值丢弃。"],
+    ["看产品承接", "能承接才说怎么承接；不能承接就明确说不建议硬接。"],
+    ["三种输出", "优先创作大纲；必要时再生成官号挂车图文或博主文字脚本。"],
+  ];
+  decisionItems.forEach((el, idx) => {
+    if (!copy[idx]) return;
+    el.innerHTML = `<strong>${esc(copy[idx][0])}</strong><span>${esc(copy[idx][1])}</span>`;
+  });
+}
+
 const originalResetFormOverride = typeof resetForm === "function" ? resetForm : null;
 resetForm = function resetFormOverride() {
   if (originalResetFormOverride) originalResetFormOverride();
   configureProcessModesOverride();
+  configureWorkbenchCopyOverride();
   const process = document.querySelector("#processMode");
   if (process) process.value = "先判断价值";
   const form = document.querySelector("#contentForm");
@@ -183,6 +213,7 @@ function resultCard(result, item = null) {
 }
 
 configureProcessModesOverride();
+configureWorkbenchCopyOverride();
 const defaultProcessMode = document.querySelector("#processMode");
 if (defaultProcessMode && defaultProcessMode.value === "只登记") defaultProcessMode.value = "先判断价值";
 load();
