@@ -42,7 +42,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo.
 echo [3/4] 正在检查 8765 端口...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if (-not $existing) { exit 3 }; $closed=$false; foreach ($conn in $existing) { $owningPid=$conn.OwningProcess; $proc=Get-CimInstance Win32_Process -Filter \"ProcessId=$owningPid\" -ErrorAction SilentlyContinue; $cmd=($proc.CommandLine | Out-String); if ($cmd -match 'workbench\\server(_v2)?\.py') { Write-Host \"检测到旧工作台服务，正在关闭 PID $owningPid\"; Stop-Process -Id $owningPid -Force; $closed=$true } }; if ($closed) { Start-Sleep -Seconds 1; exit 3 } else { exit 4 } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $port=8765; $existing=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if (-not $existing) { exit 3 }; $closed=$false; foreach ($conn in $existing) { $owningPid=$conn.OwningProcess; $proc=Get-CimInstance Win32_Process -Filter \"ProcessId=$owningPid\" -ErrorAction SilentlyContinue; $cmd=($proc.CommandLine | Out-String); if ($cmd -match 'workbench\\server(_v2|_v3)?\.py') { Write-Host \"检测到旧工作台服务，正在关闭 PID $owningPid\"; Stop-Process -Id $owningPid -Force; $closed=$true } }; if ($closed) { Start-Sleep -Seconds 1; exit 3 } else { exit 4 } }"
 if errorlevel 4 (
   echo 端口 8765 已被其他程序占用，无法安全关闭。
   echo 请关闭占用 8765 的程序，或把这个窗口截图发给 GPT。
@@ -54,11 +54,11 @@ if errorlevel 4 (
 echo.
 echo [4/4] 正在启动工作台服务...
 echo 浏览器即将打开：%WORKBENCH_URL%
-echo 当前启动入口：workbench\server_v2.py
+echo 当前启动入口：workbench\server_v3.py
 echo 如果下面出现 Python 报错，请把整个窗口截图发给 GPT。
 echo.
 start "" "%WORKBENCH_URL%"
-".\.venv\Scripts\python.exe" ".\workbench\server_v2.py"
+".\.venv\Scripts\python.exe" ".\workbench\server_v3.py"
 
 echo.
 echo 工作台服务已退出或启动失败。请把这个窗口截图发给 GPT。
