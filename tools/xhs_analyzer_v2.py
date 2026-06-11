@@ -2,7 +2,8 @@
 
 Keeps the original xhs_analyzer implementation, but patches metadata parsing so
 note title/author/engagement fields are not lost when opencli returns nested JSON
-objects instead of the older [{field, value}] rows.
+objects instead of the older [{field, value}] rows. Also appends a diagnostics
+block to the material package so we can see why note/comments failed.
 """
 
 import json
@@ -27,14 +28,17 @@ CONTENT_KEYS = {
     "desc", "description", "content", "text", "notecontent", "note_content",
 }
 AUTHOR_KEYS = {
-    "author", "nickname", "nick_name", "nickname", "username", "user_name",
+    "author", "nickname", "nick_name", "username", "user_name",
     "name", "usernickname", "user_nickname",
 }
 LIKE_KEYS = {"likes", "like", "liked", "likedcount", "liked_count", "likecount", "like_count"}
 COLLECT_KEYS = {"collects", "collect", "collected", "collectedcount", "collected_count", "collectcount", "collect_count", "favoritecount", "favorite_count"}
 COMMENT_KEYS = {"comments", "comment", "commentcount", "comment_count", "commentscount", "comments_count"}
 TAG_KEYS = {"tags", "taglist", "hash_tags", "hashtags"}
-LIST_KEYS = {"comments", "commentlist", "items", "list", "notes", "result", "results"}
+LIST_KEYS = {"comments", "commentlist", "items", "list", "notes", "result", "results", "data"}
+
+ORIGINAL_GENERATE_REPORT = base.generate_report
+ORIGINAL_GENERATE_FINAL_REPORT = base.generate_final_report
 
 
 def normalize_key(key: object) -> str:
@@ -98,13 +102,16 @@ def set_if_empty(result: dict, key: str, value: object):
 def extract_note_fields(value) -> dict:
     """Extract a flat note dict from nested opencli output."""
     if isinstance(value, list):
-        # Old format: [{field, value}]
         result = {}
         for row in value:
             if not isinstance(row, dict):
                 continue
             if "field" in row:
                 result[str(row.get("field", ""))] = row.get("value", "")
+            else:
+                nested = extract_note_fields(row)
+                for key, item in nested.items():
+                    result.setdefault(key, item)
         return normalize_note_dict(result)
 
     if not isinstance(value, dict):
@@ -119,7 +126,6 @@ def extract_note_fields(value) -> dict:
             elif k in CONTENT_KEYS:
                 set_if_empty(result, "content", item)
             elif k in AUTHOR_KEYS:
-                # Avoid treating generic names like product/brand as author when a user object exists elsewhere.
                 set_if_empty(result, "author", item)
             elif k in LIKE_KEYS:
                 set_if_empty(result, "likes", item)
@@ -144,7 +150,6 @@ def extract_note_fields(value) -> dict:
 def normalize_note_dict(value: dict) -> dict:
     if not isinstance(value, dict):
         return {}
-    # If already flat, keep and supplement aliases.
     extracted = extract_note_fields(value) if not any(k in value for k in ["title", "author", "content"]) else {}
     result = dict(value)
     for key, item in extracted.items():
@@ -175,7 +180,6 @@ def patched_parse_rows(text: str):
         return value
     if isinstance(value, dict):
         list_value = first_list_value(value)
-        # If this looks like a comments/download response, preserve the list.
         if list_value and not extract_note_fields(value).get("title"):
             return list_value
         note = extract_note_fields(value)
@@ -193,11 +197,12 @@ def patched_fields_to_dict(rows) -> dict:
                 continue
             if "field" in row:
                 result[str(row.get("field", ""))] = row.get("value", "")
+            else:
+                nested = extract_note_fields(row)
+                for key, item in nested.items():
+                    result.setdefault(key, item)
         if result:
             return normalize_note_dict(result)
-        # Some tools return a single note object inside a list.
-        if len(rows) == 1 and isinstance(rows[0], dict):
-            return normalize_note_dict(rows[0])
     return {}
 
 
@@ -228,14 +233,83 @@ def patched_comment_insights(comments) -> dict:
     return {"demand_comments": demand_comments[:10], "common_terms": common}
 
 
+def short_text(path: Path, limit: int = 1800) -> str:
+    if not path.exists():
+        return "文件不存在"
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return "空"
+    return text[:limit] + ("\n……已截断……" if len(text) > limit else "")
+
+
+def command_status(raw_dir: Path, name: str, parsed_count: int | None = None) -> dict:
+    stdout_path = raw_dir / f"{name}.stdout.txt"
+    stderr_path = raw_dir / f"{name}.stderr.txt"
+    stdout = short_text(stdout_path, 1200)
+    stderr = short_text(stderr_path, 1200)
+    ok = bool(parsed_count and parsed_count > 0)
+    if name == "note":
+        value = parse_json_value(stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else "")
+        ok = bool(extract_note_fields(value).get("title") or extract_note_fields(value).get("author"))
+    return {"name": name, "ok": ok, "parsed_count": parsed_count, "stdout": stdout, "stderr": stderr}
+
+
+def append_diagnostics(report_path: Path, raw_dir: Path, note_rows, comments_rows, download_rows):
+    diagnostics = {
+        "note": command_status(raw_dir, "note", 1 if patched_fields_to_dict(note_rows) else 0),
+        "comments": command_status(raw_dir, "comments", len(normalize_comments(comments_rows))),
+        "download": command_status(raw_dir, "download", len(download_rows) if isinstance(download_rows, list) else 0),
+    }
+    (raw_dir / "diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    lines = ["", "## 抓取诊断", ""]
+    for key in ["note", "comments", "download"]:
+        item = diagnostics[key]
+        lines.extend([
+            f"### {key}",
+            f"- 状态：{'成功' if item['ok'] else '未成功或未解析到有效数据'}",
+            f"- 解析数量：{item['parsed_count']}",
+            "- stderr 摘要：",
+            "```txt",
+            item["stderr"],
+            "```",
+            "- stdout 摘要：",
+            "```txt",
+            item["stdout"],
+            "```",
+            "",
+        ])
+    with report_path.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def patched_generate_report(*args, **kwargs):
+    ORIGINAL_GENERATE_REPORT(*args, **kwargs)
+    report_path = kwargs.get("report_path") if kwargs else None
+    asset_dir = kwargs.get("asset_dir") if kwargs else None
+    note = kwargs.get("note") if kwargs else None
+    comments = kwargs.get("comments") if kwargs else None
+    download_rows = kwargs.get("download_rows") if kwargs else None
+    if report_path is None and len(args) >= 1:
+        report_path = args[0]
+    if asset_dir is None and len(args) >= 7:
+        asset_dir = args[6]
+    if note is None and len(args) >= 4:
+        note = args[3]
+    if comments is None and len(args) >= 5:
+        comments = args[4]
+    if download_rows is None and len(args) >= 6:
+        download_rows = args[5]
+    if report_path and asset_dir:
+        raw_dir = Path(asset_dir).parent / "raw"
+        append_diagnostics(Path(report_path), raw_dir, note or {}, comments or [], download_rows or [])
+
+
 # Patch base module functions used by base.main().
 base.parse_rows = patched_parse_rows
 base.fields_to_dict = patched_fields_to_dict
 base.comment_insights = patched_comment_insights
-
-# Do not hard-code removal of specific author watermarks in v2. Keep original OCR
-# behavior otherwise by patching only the exact noisy filter through a wrapper would
-# be brittle, so metadata parsing is the primary fix here.
+base.generate_report = patched_generate_report
 
 
 if __name__ == "__main__":
