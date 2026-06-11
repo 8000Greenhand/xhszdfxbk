@@ -112,6 +112,17 @@ function isUrlLikeOverride(value) {
   return /^https?:\/\//i.test(text) || text.includes("xiaohongshu.com/explore/");
 }
 
+function isBadTitleFallbackOverride(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (isUrlLikeOverride(text)) return true;
+  if (["未提取到", "未命名样本", "undefined", "null"].includes(text)) return true;
+  if (/^[0-9a-f]{8,32}$/i.test(text)) return true;
+  if (/^小红书笔记\s*[0-9a-f]{8,}$/i.test(text)) return true;
+  if (/^\d{8}-\d{6}_[0-9a-z]+$/i.test(text)) return true;
+  return false;
+}
+
 function noteIdFromUrlOverride(url) {
   const match = String(url || "").match(/explore\/([^/?#]+)/);
   return match ? match[1] : "";
@@ -125,13 +136,12 @@ function dateOnlyOverride(value) {
 
 function readableSampleTitleOverride(item, analysisMeta = {}) {
   const manualTitle = String(item.title || "").trim();
-  if (manualTitle && !isUrlLikeOverride(manualTitle)) return manualTitle;
+  if (!isBadTitleFallbackOverride(manualTitle)) return manualTitle;
 
   const analyzedTitle = String(analysisMeta.title || "").trim();
-  if (analyzedTitle && !isUrlLikeOverride(analyzedTitle)) return analyzedTitle;
+  if (!isBadTitleFallbackOverride(analyzedTitle)) return analyzedTitle;
 
-  const noteId = noteIdFromUrlOverride(item.url || manualTitle);
-  return noteId ? `小红书笔记 ${noteId}` : (item.id || "未命名样本");
+  return "标题未提取";
 }
 
 function readableAuthorOverride(item, analysisMeta = {}) {
@@ -139,7 +149,7 @@ function readableAuthorOverride(item, analysisMeta = {}) {
   if (manualAuthor) return manualAuthor;
 
   const analyzedAuthor = String(analysisMeta.author || "").trim();
-  if (analyzedAuthor) return analyzedAuthor;
+  if (analyzedAuthor && analyzedAuthor !== "未提取到") return analyzedAuthor;
 
   return "账号未知";
 }
@@ -158,7 +168,7 @@ function readableContentFormOverride(item, result = null) {
 function sampleHeadlinePartsOverride(item, result = null, analysisMeta = {}) {
   const author = readableAuthorOverride(item, analysisMeta);
   const contentForm = readableContentFormOverride(item, result);
-  const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || "");
+  const dateText = dateOnlyOverride(item.publishDate || item.createdAt || result?.status?.created_at || result?.status?.updated_at || "");
   return [author, contentForm, dateText].filter(Boolean);
 }
 
@@ -240,14 +250,17 @@ function renderMissing() {
 function resultCard(result, item = null) {
   const summary = resultSummary(result);
   const analysisMeta = parseAnalysisMeta(result?.analysisText || "");
-  const title = item ? readableSampleTitleOverride(item, analysisMeta) : (analysisMeta.title || result.id);
+  const title = item ? readableSampleTitleOverride(item, analysisMeta) : (isBadTitleFallbackOverride(analysisMeta.title) ? "标题未提取" : analysisMeta.title);
+  const fallbackItem = item || { creator: analysisMeta.author || "", contentForm: "", createdAt: result.status?.updated_at || result.status?.created_at || "" };
+  const headlineParts = sampleHeadlinePartsOverride(fallbackItem, result, analysisMeta);
+  const headline = headlineParts.length ? headlineParts.join(" ｜ ") : "GPT 分析结果";
   return `
     <article class="result-card" id="result-${esc(result.id)}">
       <div class="result-head">
         <div>
-          <p class="eyebrow">${esc(item?.sampleType || "GPT 分析结果")} · ${esc(item?.contentForm || "")}</p>
-          <h3>${esc(title)}</h3>
-          ${analysisMeta.author ? `<p class="muted">${esc(analysisMeta.author)}</p>` : ""}
+          <p class="eyebrow">${esc(item?.sampleType || "GPT 分析结果")} · ${esc(item?.processMode || result.status?.sample_pool || "")}</p>
+          <h3>${esc(headline)}</h3>
+          <p class="muted note-title">${esc(title)}</p>
         </div>
         ${badge(item?.gpt?.status || result.status?.status || "已完成分析")}
       </div>
